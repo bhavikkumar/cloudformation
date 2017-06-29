@@ -1,0 +1,56 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Template to create standard user groups.'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'User Group Parameters'
+      Parameters:
+      - AdminGroupName
+      - SecurityGroupName
+
+Parameters:
+  AdminGroupName:
+    Description: 'The name of the adminitration user group'
+    Type: String
+    MaxLength: 64
+
+  SecurityGroupName:
+    Description: 'The name of the security user group'
+    Type: String
+    MaxLength: 64
+
+Conditions:
+  NeedsAdminGroup: !Not [!Equals [ !Ref AdminGroupName, "" ]]
+  NeedsSecurityGroup: !Not [!Equals [ !Ref SecurityGroupName, "" ]]
+
+Resources:
+  AdminGroup:
+    Condition: NeedsAdminGroup
+    Type: "AWS::IAM::Group"
+    Properties:
+      GroupName: !Ref AdminGroupName
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AdministratorAccess"
+
+  SecurityGroup:
+    Condition: NeedsSecurityGroup
+    Type: "AWS::IAM::Group"
+    Properties:
+      GroupName: !Ref SecurityGroupName
+
+Outputs:
+  AdminGroupArn:
+    Condition: NeedsAdminGroup
+    Description: "The Administrator Group ARN"
+    Value: !GetAtt AdminGroup.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-AdminUserGroup'
+
+  SecurityGroupArn:
+    Condition: NeedsSecurityGroup
+    Description: "The Security Group ARN"
+    Value: !GetAtt SecurityGroup.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityUserGroup'
