@@ -56,6 +56,7 @@ Resources:
           # Extend this as required for the number of account ids. By default the current account is added
           Resource:
             - !Sub 'arn:aws:s3:::${TrailBucket}/AWSLogs/${AWS::AccountId}/*'
+            - !Join [ "", [ !Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [0, !Ref AdditionalAccounts ], "/*" ] ]
           Condition:
             StringEquals:
               's3:x-amz-acl': 'bucket-owner-full-control'
@@ -123,12 +124,26 @@ Resources:
         Id: "key-default-1"
         Statement:
           -
+            Sid: "Allow alias creation"
+            Effect: "Allow"
+            Principal:
+              AWS: [
+                "*"
+              ]
+            Action:
+              - "kms:CreateAlias"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                'kms:ViaService': !Sub 'ec2.${AWS::Region}.amazonaws.com'
+                'kms:CallerAccount': !Sub '${AWS::AccountId}'
+          -
             Sid: "Allow administration of the key"
             Effect: "Allow"
             Principal:
               AWS: [
-                "arn:aws:iam::750644679422:root",
-                "arn:aws:iam::750644679422:user/bhavikk"
+                !Sub 'arn:aws:iam::${AWS::AccountId}:root',
+                !Sub 'arn:aws:iam::${AWS::AccountId}:user/bhavikk'
               ]
             Action:
               - "kms:Create*"
@@ -164,6 +179,14 @@ Resources:
               StringLike:
                 kms:EncryptionContext:aws:cloudtrail:arn:
                   - !Sub 'arn:aws:cloudtrail:*:${AWS::AccountId}:trail/*'
+                  - !Join [ "", [ "arn:aws:cloudtrail:*:", !Select [0, !Ref AdditionalAccounts ], ":trail/*" ] ]
+
+  # Create KMS Key for CloudTrail
+  TrailKeyAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: 'alias/CloudTrail-KMS-Key'
+      TargetKeyId: !Ref TrailKey
 
   # Create the CloudTrail
   Trail:
@@ -181,4 +204,4 @@ Resources:
       CloudWatchLogsLogGroupArn: !Sub '${TrailLogGroup.Arn}'
       CloudWatchLogsRoleArn: !Sub '${TrailLogGroupRole.Arn}'
       SnsTopicName: !Sub '${TrailTopic.TopicName}'
-      KMSKeyId: !Sub '${TrailKey.Arn}'
+      KMSKeyId: !Ref TrailKeyAlias
