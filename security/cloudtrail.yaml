@@ -149,8 +149,7 @@ Resources:
             Effect: "Allow"
             Principal:
               AWS: [
-                !Sub 'arn:aws:iam::${AWS::AccountId}:root',
-                !Sub 'arn:aws:iam::${AWS::AccountId}:user/bhavikk'
+                !Sub 'arn:aws:iam::${AWS::AccountId}:root'
               ]
             Action:
               - "kms:Create*"
