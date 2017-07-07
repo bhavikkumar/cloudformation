@@ -62,6 +62,7 @@ Resources:
           Resource:
             - !Sub 'arn:aws:s3:::${TrailBucket}/AWSLogs/${AWS::AccountId}/*'
             - !Join [ "", [ !Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [0, !Ref AdditionalAccounts ], "/*" ] ]
+            - !Join [ "", [ !Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [1, !Ref AdditionalAccounts ], "/*" ] ]
           Condition:
             StringEquals:
               's3:x-amz-acl': 'bucket-owner-full-control'
@@ -186,6 +187,7 @@ Resources:
                 kms:EncryptionContext:aws:cloudtrail:arn:
                   - !Sub 'arn:aws:cloudtrail:*:${AWS::AccountId}:trail/*'
                   - !Join [ "", [ "arn:aws:cloudtrail:*:", !Select [0, !Ref AdditionalAccounts ], ":trail/*" ] ]
+                  - !Join [ "", [ "arn:aws:cloudtrail:*:", !Select [1, !Ref AdditionalAccounts ], ":trail/*" ] ]
 
   # Create KMS Key for CloudTrail
   TrailKeyAlias:
