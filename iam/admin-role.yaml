@@ -28,6 +28,10 @@ Resources:
                   - !Join ['', [ 'arn:aws:iam::', !Ref TrustedAccount, ':root' ] ]
             Action:
               - 'sts:AssumeRole'
+            Condition:
+              BoolIfExists:
+                aws:MultiFactorAuthPresent: true
+
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AdministratorAccess
       RoleName: 'AdminAccessRole'
