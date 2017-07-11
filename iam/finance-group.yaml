@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Template to create administration group with the ability to assume administrator access in other accounts'
+Description: 'Template to create finance group with the ability to assume billing access in other accounts'
 Resources:
   AssumeBillingAccessRolePolicy:
     Type: "AWS::IAM::ManagedPolicy"
