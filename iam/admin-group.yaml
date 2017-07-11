@@ -2,7 +2,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Template to create administration group with the ability to assume administrator access in other accounts'
 Resources:
-  AssumeAdminAccessRoleAPolicy:
+  AssumeAdminAccessRolePolicy:
     Type: "AWS::IAM::ManagedPolicy"
     Properties:
       Description: "This policy allows users to assume the administrator access"
@@ -23,7 +23,7 @@ Resources:
     Properties:
       ManagedPolicyArns:
         - "arn:aws:iam::aws:policy/AdministratorAccess"
-        - !Ref AssumeAdminAccessRoleAPolicy
+        - !Ref AssumeAdminAccessRolePolicy
 
 Outputs:
   AdminGroupName:
