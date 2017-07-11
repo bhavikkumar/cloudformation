@@ -1,0 +1,37 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Template to create administration group with the ability to assume administrator access in other accounts'
+Resources:
+  AssumeBillingAccessRolePolicy:
+    Type: "AWS::IAM::ManagedPolicy"
+    Properties:
+      Description: "This policy allows users to assume the administrator access"
+      ManagedPolicyName: BillingAccessPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Allow Finance users to assume BillingAccessRole in any account
+          -
+            Effect: "Allow"
+            Action:
+              - "sts:AssumeRole"
+            Resource:
+              - "arn:aws:iam::*:role/BillingAccessRole"
+
+  Users:
+    Type: "AWS::IAM::Group"
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/job-function/Billing"
+        - !Ref AssumeBillingAccessRolePolicy
+
+Outputs:
+  BillingGroupName:
+    Description: "The Billing Group Name"
+    Value: !Ref Users
+
+  BillingGroupArn:
+    Description: "The Billing Group ARN"
+    Value: !GetAtt Users.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BillingUserGroup'
