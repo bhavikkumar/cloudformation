@@ -31,3 +31,9 @@ Outputs:
     Description: 'Hosted Zone Id'
     Export:
       Name: !Sub '${AWS::StackName}-HostedZoneId'
+
+  DomainName:
+    Value: !Ref DomainName
+    Description: 'Domain'
+    Export:
+      Name: !Sub '${AWS::StackName}-DomainName'
