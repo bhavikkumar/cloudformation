@@ -61,7 +61,7 @@ Resources:
           TTL: 300
           ResourceRecords:
           - !Sub '"${SPFRecord}"'
-        - Name: !Sub "smtp._domainkey.${DomainName}."
+        - Name: !Sub "mx._domainkey.${DomainName}."
           Type: TXT
           TTL: 300
           ResourceRecords:
