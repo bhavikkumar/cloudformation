@@ -231,3 +231,29 @@ Resources:
       CloudWatchLogsRoleArn: !Sub '${TrailLogGroupRole.Arn}'
       SnsTopicName: !Sub '${TrailTopic.TopicName}'
       KMSKeyId: !Ref TrailKeyArn
+
+Outputs:
+  CloudTrailInternal:
+    Condition: InternalBucket
+    Description: "CloudTrail Name"
+    Value: !Ref Trail
+
+  CloudTrailExternal:
+    Condition: ExternalBucket
+    Description: "CloudTrail Name"
+    Value: !Ref ExternalTrail
+
+  CloudTrailBucketInternal:
+    Condition: InternalBucket
+    Description: "S3 Bucket for Logs"
+    Value: !Ref TrailBucket
+
+  CloudTrailKeyArn:
+    Condition: InternalBucket
+    Description: "KMS Key ARN"
+    Value: !GetAtt TrailKey.Arn
+
+  CloudTrailKeyAlias:
+    Condition: InternalBucket
+    Description: "KMS Key Alias Name"
+    Value: !Ref TrailKeyAlias
