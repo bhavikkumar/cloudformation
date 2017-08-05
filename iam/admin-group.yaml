@@ -18,7 +18,7 @@ Resources:
             Resource:
               - "arn:aws:iam::*:role/AdminAccessRole"
 
-  Users:
+  AdminGroup:
     Type: "AWS::IAM::Group"
     Properties:
       ManagedPolicyArns:
@@ -28,10 +28,10 @@ Resources:
 Outputs:
   AdminGroupName:
     Description: "The Administrator Group Name"
-    Value: !Ref Users
+    Value: !Ref AdminGroup
 
   AdminGroupArn:
     Description: "The Administrator Group ARN"
-    Value: !GetAtt Users.Arn
+    Value: !GetAtt AdminGroup.Arn
     Export:
       Name: !Sub '${AWS::StackName}-AdminUserGroup'

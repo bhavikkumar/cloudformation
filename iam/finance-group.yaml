@@ -18,7 +18,7 @@ Resources:
             Resource:
               - "arn:aws:iam::*:role/BillingAccessRole"
 
-  Users:
+  FinanceGroup:
     Type: "AWS::IAM::Group"
     Properties:
       ManagedPolicyArns:
@@ -28,10 +28,10 @@ Resources:
 Outputs:
   BillingGroupName:
     Description: "The Billing Group Name"
-    Value: !Ref Users
+    Value: !Ref FinanceGroup
 
   BillingGroupArn:
     Description: "The Billing Group ARN"
-    Value: !GetAtt Users.Arn
+    Value: !GetAtt FinanceGroup.Arn
     Export:
       Name: !Sub '${AWS::StackName}-BillingUserGroup'

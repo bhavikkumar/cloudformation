@@ -32,7 +32,7 @@ Resources:
               - "cloudtrail:LookupEvents"
             Resource:
               - "*"
-  Users:
+  SecurityGroup:
     Type: "AWS::IAM::Group"
     Properties:
       ManagedPolicyArns:
@@ -43,10 +43,10 @@ Resources:
 Outputs:
   SecurityGroupName:
     Description: "The Security Group Name"
-    Value: !Ref Users
+    Value: !Ref SecurityGroup
 
   SecurityGroupArn:
     Description: "The Security Group ARN"
-    Value: !GetAtt Users.Arn
+    Value: !GetAtt SecurityGroup.Arn
     Export:
       Name: !Sub '${AWS::StackName}-SecurityUserGroup'
