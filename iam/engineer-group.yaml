@@ -18,7 +18,7 @@ Resources:
             Resource:
               - "arn:aws:iam::*:role/EngineerAccessRole"
 
-  Users:
+  EngineerGroup:
     Type: "AWS::IAM::Group"
     Properties:
       ManagedPolicyArns:
@@ -27,10 +27,10 @@ Resources:
 Outputs:
   EngineerGroupName:
     Description: "The Engineer Group Name"
-    Value: !Ref Users
+    Value: !Ref EngineerGroup
 
   EngineerGroupArn:
     Description: "The Engineer Group ARN"
-    Value: !GetAtt Users.Arn
+    Value: !GetAtt EngineerGroup.Arn
     Export:
       Name: !Sub '${AWS::StackName}-EngineerUserGroup'
