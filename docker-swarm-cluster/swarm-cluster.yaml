@@ -178,7 +178,8 @@ Resources:
         "Fn::Base64":
           !Sub |
             #!/bin/bash -xe
-            yum install -y aws-cfn-bootstrap
+            yum -y update
+            yum -y install aws-cfn-bootstrap
             /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmManagerLaunchConfiguration --configsets installAndRun --region ${AWS::Region}
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource SwarmManagerAutoScaleGroup --region ${AWS::Region}
 
