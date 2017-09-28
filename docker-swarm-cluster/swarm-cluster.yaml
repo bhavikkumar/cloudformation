@@ -92,10 +92,31 @@ Resources:
       VpcId:
         'Fn::ImportValue': !Sub '${NetworkStack}-VPC'
       SecurityGroupIngress:
+      # Port 22 is temporary, will only be accessible internally in the future.
       - IpProtocol: tcp
         FromPort: '22'
         ToPort: '22'
         CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '2377'
+        ToPort: '2377'
+        CidrIp: "10.0.0.0/16"
+      - IpProtocol: tcp
+        FromPort: '7946'
+        ToPort: '7946'
+        CidrIp: "10.0.0.0/16"
+      - IpProtocol: udp
+        FromPort: '7946'
+        ToPort: '7946'
+        CidrIp: "10.0.0.0/16"
+      - IpProtocol: tcp
+        FromPort: '4789'
+        ToPort: '4789'
+        CidrIp: "10.0.0.0/16"
+      - IpProtocol: udp
+        FromPort: '4789'
+        ToPort: '4789'
+        CidrIp: "10.0.0.0/16"
 
   SwarmSQS:
     Type: AWS::SQS::Queue
