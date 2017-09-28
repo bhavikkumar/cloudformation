@@ -100,23 +100,23 @@ Resources:
       - IpProtocol: tcp
         FromPort: '2377'
         ToPort: '2377'
-        CidrIp: "10.0.0.0/16"
+        CidrIp: "10.0.0.0/8"
       - IpProtocol: tcp
         FromPort: '7946'
         ToPort: '7946'
-        CidrIp: "10.0.0.0/16"
+        CidrIp: "10.0.0.0/8"
       - IpProtocol: udp
         FromPort: '7946'
         ToPort: '7946'
-        CidrIp: "10.0.0.0/16"
+        CidrIp: "10.0.0.0/8"
       - IpProtocol: tcp
         FromPort: '4789'
         ToPort: '4789'
-        CidrIp: "10.0.0.0/16"
+        CidrIp: "10.0.0.0/8"
       - IpProtocol: udp
         FromPort: '4789'
         ToPort: '4789'
-        CidrIp: "10.0.0.0/16"
+        CidrIp: "10.0.0.0/8"
 
   SwarmSQS:
     Type: AWS::SQS::Queue
