@@ -395,7 +395,7 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-RouteTableCPrivate'
   CidrBlock:
-    Description: 'Cidr Range'
+    Description: 'VPC Cidr Block'
     Value: !GetAtt VPC.CidrBlock
     Export:
       Name: !Sub '${AWS::StackName}-CidrBlock'
