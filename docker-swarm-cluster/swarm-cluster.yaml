@@ -131,6 +131,65 @@ Resources:
         CidrIp:
           'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
 
+  SwarmDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        -
+          AttributeName: id
+          AttributeType: S
+      KeySchema:
+        -
+          AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      TableName: !Join ['-', [ !Ref "AWS::StackName", dockerswarm ] ]
+
+  SwarmManagerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+
+  ManagerDynamoDBPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-manager-dynamodb-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:PutItem"
+            Resource: !GetAtt SwarmDynamoDBTable.Arn
+      Roles:
+        - !Ref SwarmManagerRole
+
+  SwarmManagerInstanceProfile:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref SwarmManagerRole
+
   # SwarmSQS:
   #   Type: AWS::SQS::Queue
   #   Properties:
@@ -224,6 +283,7 @@ Resources:
             VolumeType: !Ref ManagerDiskType
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'ManagerInstanceType', Arch]]
       InstanceType: !Ref ManagerInstanceType
+      IamInstanceProfile: !Ref SwarmManagerInstanceProfile
       KeyName: !Ref KeyName
       SecurityGroups:
         - !Ref SwarmManagerSSHSecurityGroup
@@ -274,10 +334,6 @@ Resources:
           Key: swarm-node-type
           PropagateAtLaunch: true
           Value: manager
-        -
-          Key: swarm-stack-id
-          PropagateAtLaunch: true
-          Value: !Ref AWS::StackId
 
   # SwarmManagerLifecycleHook:
   #   DependsOn:
@@ -304,6 +360,16 @@ Outputs:
     Value: !Ref SwarmClusterSecurityGroup
     Export:
       Name: !Sub '${AWS::StackName}-SwarmClusterSecurityGroup'
+  SwarmTableName:
+    Description: The DynamoDB table name for the swarm cluster
+    Value: !Ref SwarmDynamoDBTable
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmTableName'
+  SwarmTableArn:
+    Description: The DynamoDB Table ARN for the swarm cluster
+    Value: !GetAtt SwarmDynamoDBTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmTableArn'
   # SwarmLifecycleHook:
   #   Description: The SQS Queue which gets termination messages
   #   Value: !Ref SwarmSQS
