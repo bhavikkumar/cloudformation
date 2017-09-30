@@ -85,10 +85,10 @@ Resources:
       DisplayName: 'Manager ASG Notifications'
       TopicName: 'SwarmManagerNotifications'
 
-  SwarmManagerSecurityGroup:
+  SwarmManagerSSHSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Docker Swarm Mode Security Group
+      GroupDescription: Allow SSH to the Docker Swarm Managers
       VpcId:
         'Fn::ImportValue': !Sub '${NetworkStack}-VPC'
       SecurityGroupIngress:
@@ -97,78 +97,114 @@ Resources:
         FromPort: '22'
         ToPort: '22'
         CidrIp: 0.0.0.0/0
+
+  SwarmClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Docker Swarm Mode Security Groups
+      VpcId:
+        'Fn::ImportValue': !Sub '${NetworkStack}-VPC'
+      SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: '2377'
         ToPort: '2377'
-        CidrIp: "10.0.0.0/8"
+        CidrIp:
+          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '7946'
         ToPort: '7946'
-        CidrIp: "10.0.0.0/8"
+        CidrIp:
+          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
       - IpProtocol: udp
         FromPort: '7946'
         ToPort: '7946'
-        CidrIp: "10.0.0.0/8"
+        CidrIp:
+          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '4789'
         ToPort: '4789'
-        CidrIp: "10.0.0.0/8"
+        CidrIp:
+          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
       - IpProtocol: udp
         FromPort: '4789'
         ToPort: '4789'
-        CidrIp: "10.0.0.0/8"
+        CidrIp:
+          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
 
-  SwarmSQS:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: SwarmQueue
+  # SwarmSQS:
+  #   Type: AWS::SQS::Queue
+  #   Properties:
+  #     QueueName: SwarmQueue
 
-  SwarmSQSRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          -
-            Effect: "Allow"
-            Principal:
-              Service:
-                - "ec2.amazonaws.com"
-                - "autoscaling.amazonaws.com"
-            Action:
-              - "sts:AssumeRole"
-      Path: /
+  # SwarmSQSRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         -
+  #           Effect: "Allow"
+  #           Principal:
+  #             Service:
+  #               - "autoscaling.amazonaws.com"
+  #           Action:
+  #             - "sts:AssumeRole"
+  #     Path: /
 
-  SwarmSQSPolicy:
-    DependsOn:
-      - SwarmSQS
-      - SwarmSQSRole
-    Type: "AWS::IAM::Policy"
-    Properties:
-      PolicyName: "swarm-sqs-policy"
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "sqs:DeleteMessage"
-              - "sqs:ReceiveMessage"
-              - "sqs:SendMessage"
-              - "sqs:GetQueueUrl"
-              - "sns:Publish"
-            Resource: !GetAtt SwarmSQS.Arn
-      Roles:
-        - !Ref SwarmSQSRole
+  # SwarmSQSPolicy:
+  #   DependsOn:
+  #     - SwarmSQS
+  #     - SwarmSQSRole
+  #   Type: "AWS::IAM::Policy"
+  #   Properties:
+  #     PolicyName: "swarm-sqs-policy"
+  #     PolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         -
+  #           Effect: "Allow"
+  #           Action:
+  #             - "sqs:DeleteMessage"
+  #             - "sqs:ReceiveMessage"
+  #             - "sqs:SendMessage"
+  #             - "sqs:GetQueueUrl"
+  #             - "sns:Publish"
+  #           Resource: !GetAtt SwarmSQS.Arn
+  #     Roles:
+  #       - !Ref SwarmSQSRole
 
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update and install Docker
       AWS::CloudFormation::Init:
         configSets:
-          installAndRun:
-            - dockerInstall
-        dockerInstall:
+          full_install:
+            - install_cfn
+            - install_docker
+        install_cfn:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfig --configsets full_install --region ${AWS::Region}
+                runas=root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files: [/etc/cfn/cfn-hup.conf, /etc/cfn/hooks.d/cfn-auto-reloader.conf]
+        install_docker:
           packages:
             yum:
               docker: []
@@ -177,11 +213,7 @@ Resources:
               docker:
                 enabled: 'true'
                 ensureRunning: 'true'
-              cfn-hup:
-                enabled: 'true'
-                ensureRunning: 'true'
-                files: [/etc/cfn/cfn-hup.conf, /etc/cfn/hooks.d/cfn-auto-reloader.conf]
-    DependsOn: SwarmManagerSecurityGroup
+    DependsOn: SwarmManagerSSHSecurityGroup
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -194,14 +226,15 @@ Resources:
       InstanceType: !Ref ManagerInstanceType
       KeyName: !Ref KeyName
       SecurityGroups:
-        - !Ref SwarmManagerSecurityGroup
+        - !Ref SwarmManagerSSHSecurityGroup
+        - !Ref SwarmClusterSecurityGroup
       UserData:
         "Fn::Base64":
           !Sub |
             #!/bin/bash -xe
-            yum -y update
-            yum -y install aws-cfn-bootstrap
-            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmManagerLaunchConfiguration --configsets installAndRun --region ${AWS::Region}
+            yum update -y
+            yum install -y aws-cfn-bootstrap
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmManagerLaunchConfiguration --configsets full_install --region ${AWS::Region}
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource SwarmManagerAutoScaleGroup --region ${AWS::Region}
 
   SwarmManagerAutoScaleGroup:
@@ -246,29 +279,34 @@ Resources:
           PropagateAtLaunch: true
           Value: !Ref AWS::StackId
 
-  SwarmManagerLifecycleHook:
-    DependsOn:
-      - SwarmManagerAutoScaleGroup
-      - SwarmSQS
-      - SwarmSQSRole
-      - SwarmSQSPolicy
-    Type: AWS::AutoScaling::LifecycleHook
-    Properties:
-      AutoScalingGroupName: !Ref SwarmManagerAutoScaleGroup
-      LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
-      NotificationTargetARN: !GetAtt SwarmSQS.Arn
-      RoleARN: !GetAtt SwarmSQSRole.Arn
+  # SwarmManagerLifecycleHook:
+  #   DependsOn:
+  #     - SwarmManagerAutoScaleGroup
+  #     - SwarmSQS
+  #     - SwarmSQSRole
+  #     - SwarmSQSPolicy
+  #   Type: AWS::AutoScaling::LifecycleHook
+  #   Properties:
+  #     AutoScalingGroupName: !Ref SwarmManagerAutoScaleGroup
+  #     LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+  #     NotificationTargetARN: !GetAtt SwarmSQS.Arn
+  #     RoleARN: !GetAtt SwarmSQSRole.Arn
 
 Outputs:
   ManagerSecurityGroupID:
     Description: SecurityGroup ID of the Swarm Manager
-    Value: !Ref SwarmManagerSecurityGroup
+    Value: !Ref SwarmManagerSSHSecurityGroup
   ManagerAsgNotificationTopic:
     Description: The ASG notification topic of managers being started or terminated.
     Value: !Ref SwarmManagerAsgNotification
-  SwarmLifecycleHook:
-    Description: The SQS Queue which gets termination messages
-    Value: !Ref SwarmSQS
+  SwarmSecurityGroup:
+    Description: The security group which allows the Docker Swarm to function.
+    Value: !Ref SwarmClusterSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmClusterSecurityGroup'
+  # SwarmLifecycleHook:
+  #   Description: The SQS Queue which gets termination messages
+  #   Value: !Ref SwarmSQS
 
 Mappings:
   AWSInstanceType2Arch:
