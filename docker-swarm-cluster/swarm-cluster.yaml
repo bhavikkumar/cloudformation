@@ -297,7 +297,11 @@ Resources:
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
               cwd: "~"
-    DependsOn: SwarmManagerSSHSecurityGroup
+    DependsOn:
+      - SwarmManagerSSHSecurityGroup
+      - SwarmDynamoDBTable
+      - SwarmManagerInstanceProfile
+      - SwarmClusterSecurityGroup
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
