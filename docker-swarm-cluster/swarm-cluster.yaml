@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Docker Swarm Manager Cluster across 3 AZs'
+Description: 'Docker Swarm Manager Cluster across 3 AZs based on Docker for AWS'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -181,6 +181,23 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
+  ManagerEC2Policy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-manager-ec2-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "ec2:DescribeTags"
+            Resource: "*"
+      Roles:
+        - !Ref SwarmManagerRole
+
   SwarmManagerInstanceProfile:
     DependsOn:
       - SwarmManagerRole
@@ -240,6 +257,7 @@ Resources:
           full_install:
             - install_cfn
             - install_docker
+            - init_aws_swarm
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -272,6 +290,13 @@ Resources:
               docker:
                 enabled: 'true'
                 ensureRunning: 'true'
+        init_aws_swarm:
+          commands:
+            docker_run:
+              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker depost/init-aws-swarm:latest"
+              env:
+                DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
+              cwd: "~"
     DependsOn: SwarmManagerSSHSecurityGroup
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
