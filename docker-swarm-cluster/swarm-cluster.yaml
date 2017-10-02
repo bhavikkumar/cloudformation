@@ -251,7 +251,7 @@ Resources:
 
   SwarmManagerLaunchConfiguration:
     Metadata:
-      Comment: Update and install Docker
+      Comment: Update, Install Docker and initialise the swarm
       AWS::CloudFormation::Init:
         configSets:
           full_install:
@@ -272,8 +272,8 @@ Resources:
               content: !Sub |
                 [cfn-auto-reloader-hook]
                 triggers=post.update
-                path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init
-                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfig --configsets full_install --region ${AWS::Region}
+                path=Resources.SwarmManagerLaunchConfiguration.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmManagerLaunchConfiguration --configsets full_install --region ${AWS::Region}
                 runas=root
           services:
             sysvinit:
@@ -342,9 +342,11 @@ Resources:
         PauseTime: PT20M
         WaitOnResourceSignals: true
     Properties:
+      Cooldown: 600
       MinSize: !Ref ManagerClusterSize
       MaxSize: 14
       DesiredCapacity: !Ref ManagerClusterSize
+      HealthCheckGracePeriod: 600
       LaunchConfigurationName: !Ref SwarmManagerLaunchConfiguration
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
