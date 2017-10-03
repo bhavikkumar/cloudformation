@@ -130,6 +130,11 @@ Resources:
         ToPort: '4789'
         CidrIp:
           'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '44444'
+        ToPort: '44444'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -158,6 +163,7 @@ Resources:
             Principal:
               Service:
                 - "ec2.amazonaws.com"
+                - "autoscaling.amazonaws.com"
             Action:
               - "sts:AssumeRole"
       Path: /
@@ -198,6 +204,33 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
+  SwarmSQS:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: SwarmQueue
+
+  SwarmSQSPolicy:
+    DependsOn:
+      - SwarmSQS
+      - SwarmManagerRole
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: "swarm-sqs-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "sqs:DeleteMessage"
+              - "sqs:ReceiveMessage"
+              - "sqs:SendMessage"
+              - "sqs:GetQueueUrl"
+              - "sns:Publish"
+            Resource: !GetAtt SwarmSQS.Arn
+      Roles:
+        - !Ref SwarmManagerRole
+
   SwarmManagerInstanceProfile:
     DependsOn:
       - SwarmManagerRole
@@ -207,47 +240,49 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
-  # SwarmSQS:
-  #   Type: AWS::SQS::Queue
-  #   Properties:
-  #     QueueName: SwarmQueue
+  SwarmInternalLoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Scheme: internal
+      SecurityGroups:
+        - !Ref SwarmClusterSecurityGroup
+      Subnets:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
 
-  # SwarmSQSRole:
-  #   Type: AWS::IAM::Role
-  #   Properties:
-  #     AssumeRolePolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         -
-  #           Effect: "Allow"
-  #           Principal:
-  #             Service:
-  #               - "autoscaling.amazonaws.com"
-  #           Action:
-  #             - "sts:AssumeRole"
-  #     Path: /
+  # This is used to health check the swarm cluster.
+  SwarmHealthCheckTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /ishealthy
+      HealthCheckPort: 44444
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '204'
+      Name: NodeHealthCheck
+      # This port should only be available internally.
+      Port: 44444
+      Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${NetworkStack}-VPC'
 
-  # SwarmSQSPolicy:
-  #   DependsOn:
-  #     - SwarmSQS
-  #     - SwarmSQSRole
-  #   Type: "AWS::IAM::Policy"
-  #   Properties:
-  #     PolicyName: "swarm-sqs-policy"
-  #     PolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         -
-  #           Effect: "Allow"
-  #           Action:
-  #             - "sqs:DeleteMessage"
-  #             - "sqs:ReceiveMessage"
-  #             - "sqs:SendMessage"
-  #             - "sqs:GetQueueUrl"
-  #             - "sns:Publish"
-  #           Resource: !GetAtt SwarmSQS.Arn
-  #     Roles:
-  #       - !Ref SwarmSQSRole
+  SwarmHealthCheckHttpListener:
+    DependsOn:
+      - SwarmHealthCheckTargetGroup
+      - SwarmInternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref SwarmHealthCheckTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref SwarmInternalLoadBalancer
+      Port: 44444
+      Protocol: HTTP
 
   SwarmManagerLaunchConfiguration:
     Metadata:
@@ -258,6 +293,7 @@ Resources:
             - install_cfn
             - install_docker
             - init_aws_swarm
+            - swarm-node-healthcheck
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -297,6 +333,11 @@ Resources:
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
               cwd: "~"
+        swarm-node-healthcheck:
+          commands:
+            docker_run:
+              command: "docker run -d --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock depost/swarm-node-healthcheck:latest"
+              cwd: "~"
     DependsOn:
       - SwarmManagerSSHSecurityGroup
       - SwarmDynamoDBTable
@@ -330,6 +371,7 @@ Resources:
     DependsOn:
       - SwarmManagerAsgNotification
       - SwarmManagerLaunchConfiguration
+      - SwarmHealthCheckTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -342,12 +384,16 @@ Resources:
         PauseTime: PT20M
         WaitOnResourceSignals: true
     Properties:
-      Cooldown: 600
       MinSize: !Ref ManagerClusterSize
-      MaxSize: 14
+      MaxSize: 8
       DesiredCapacity: !Ref ManagerClusterSize
-      HealthCheckGracePeriod: 600
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
       LaunchConfigurationName: !Ref SwarmManagerLaunchConfiguration
+      MetricsCollection:
+        - Granularity: 1Minute
+      TargetGroupARNs:
+        - !Ref SwarmHealthCheckTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
@@ -370,14 +416,14 @@ Resources:
   #   DependsOn:
   #     - SwarmManagerAutoScaleGroup
   #     - SwarmSQS
-  #     - SwarmSQSRole
   #     - SwarmSQSPolicy
+  #     - SwarmManagerRole
   #   Type: AWS::AutoScaling::LifecycleHook
   #   Properties:
   #     AutoScalingGroupName: !Ref SwarmManagerAutoScaleGroup
   #     LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
   #     NotificationTargetARN: !GetAtt SwarmSQS.Arn
-  #     RoleARN: !GetAtt SwarmSQSRole.Arn
+  #     RoleARN: !GetAtt SwarmManagerRole.Arn
 
 Outputs:
   ManagerSecurityGroupID:
@@ -401,9 +447,16 @@ Outputs:
     Value: !GetAtt SwarmDynamoDBTable.Arn
     Export:
       Name: !Sub '${AWS::StackName}-SwarmTableArn'
-  # SwarmLifecycleHook:
-  #   Description: The SQS Queue which gets termination messages
-  #   Value: !Ref SwarmSQS
+  SwarmLifecycleQueue:
+    Description: The Lifecycle SQS Queue which gets instance termination messages
+    Value: !GetAtt SwarmSQS.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmSQS'
+  SwarmInternalLoadBalancer:
+    Description: The Swarm Internal Load Balancer
+    Value: !Ref SwarmInternalLoadBalancer
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmLoadBalancer'
 
 Mappings:
   AWSInstanceType2Arch:
