@@ -204,14 +204,15 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
-  SwarmSQS:
+  SwarmLifecycleQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: SwarmQueue
+      MessageRetentionPeriod: 14400
+      ReceiveMessageWaitTimeSeconds: 10
 
-  SwarmSQSPolicy:
+  SwarmLifecycleQueuePolicy:
     DependsOn:
-      - SwarmSQS
+      - SwarmLifecycleQueue
       - SwarmManagerRole
     Type: "AWS::IAM::Policy"
     Properties:
@@ -227,7 +228,7 @@ Resources:
               - "sqs:SendMessage"
               - "sqs:GetQueueUrl"
               - "sns:Publish"
-            Resource: !GetAtt SwarmSQS.Arn
+            Resource: !GetAtt SwarmLifecycleQueue.Arn
       Roles:
         - !Ref SwarmManagerRole
 
@@ -239,17 +240,6 @@ Resources:
       Path: /
       Roles:
         - !Ref SwarmManagerRole
-
-  SwarmInternalLoadBalancer:
-    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
-    Properties:
-      Scheme: internal
-      SecurityGroups:
-        - !Ref SwarmClusterSecurityGroup
-      Subnets:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
 
   # This is used to health check the swarm cluster.
   SwarmHealthCheckTargetGroup:
@@ -270,19 +260,6 @@ Resources:
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${NetworkStack}-VPC'
-
-  SwarmHealthCheckHttpListener:
-    DependsOn:
-      - SwarmHealthCheckTargetGroup
-      - SwarmInternalLoadBalancer
-    Type: 'AWS::ElasticLoadBalancingV2::Listener'
-    Properties:
-      DefaultActions:
-      - TargetGroupArn: !Ref SwarmHealthCheckTargetGroup
-        Type: forward
-      LoadBalancerArn: !Ref SwarmInternalLoadBalancer
-      Port: 44444
-      Protocol: HTTP
 
   SwarmManagerLaunchConfiguration:
     Metadata:
@@ -412,17 +389,41 @@ Resources:
           PropagateAtLaunch: true
           Value: manager
 
+  SwarmInternalLoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Scheme: internal
+      SecurityGroups:
+        - !Ref SwarmClusterSecurityGroup
+      Subnets:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
+
+  SwarmHealthCheckHttpListener:
+    DependsOn:
+      - SwarmHealthCheckTargetGroup
+      - SwarmInternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref SwarmHealthCheckTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref SwarmInternalLoadBalancer
+      Port: 44444
+      Protocol: HTTP
+
   # SwarmManagerLifecycleHook:
   #   DependsOn:
   #     - SwarmManagerAutoScaleGroup
-  #     - SwarmSQS
-  #     - SwarmSQSPolicy
+  #     - SwarmLifecycleQueue
+  #     - SwarmLifecycleQueuePolicy
   #     - SwarmManagerRole
   #   Type: AWS::AutoScaling::LifecycleHook
   #   Properties:
   #     AutoScalingGroupName: !Ref SwarmManagerAutoScaleGroup
   #     LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
-  #     NotificationTargetARN: !GetAtt SwarmSQS.Arn
+  #     NotificationTargetARN: !GetAtt SwarmLifecycleQueue.Arn
   #     RoleARN: !GetAtt SwarmManagerRole.Arn
 
 Outputs:
@@ -449,9 +450,9 @@ Outputs:
       Name: !Sub '${AWS::StackName}-SwarmTableArn'
   SwarmLifecycleQueue:
     Description: The Lifecycle SQS Queue which gets instance termination messages
-    Value: !GetAtt SwarmSQS.Arn
+    Value: !GetAtt SwarmLifecycleQueue.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-SwarmSQS'
+      Name: !Sub '${AWS::StackName}-SwarmLifecycleQueue'
   SwarmInternalLoadBalancer:
     Description: The Swarm Internal Load Balancer
     Value: !Ref SwarmInternalLoadBalancer
