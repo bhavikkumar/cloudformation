@@ -199,6 +199,7 @@ Resources:
           -
             Effect: "Allow"
             Action:
+              - "ec2:CreateTags"
               - "ec2:DescribeTags"
             Resource: "*"
       Roles:
@@ -270,7 +271,10 @@ Resources:
             - install_cfn
             - install_docker
             - init_aws_swarm
-            - swarm-node-healthcheck
+            - swarm_node_healthcheck
+            - guide_aws_swarm
+          update_install:
+            - install_cfn
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -286,7 +290,7 @@ Resources:
                 [cfn-auto-reloader-hook]
                 triggers=post.update
                 path=Resources.SwarmManagerLaunchConfiguration.Metadata.AWS::CloudFormation::Init
-                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmManagerLaunchConfiguration --configsets full_install --region ${AWS::Region}
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmManagerLaunchConfiguration -c update_install --region ${AWS::Region}
                 runas=root
           services:
             sysvinit:
@@ -310,10 +314,18 @@ Resources:
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
               cwd: "~"
-        swarm-node-healthcheck:
+        swarm_node_healthcheck:
           commands:
             docker_run:
-              command: "docker run -d --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock depost/swarm-node-healthcheck:latest"
+              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock depost/swarm-node-healthcheck:latest"
+              cwd: "~"
+        guide_aws_swarm:
+          commands:
+            docker_run:
+              command: "docker run -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker depost/guide-aws-swarm:latest"
+              env:
+                DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
+                LIFECYCLE_QUEUE: { "Ref" : "SwarmLifecycleQueue" }
               cwd: "~"
     DependsOn:
       - SwarmManagerSSHSecurityGroup
@@ -413,18 +425,19 @@ Resources:
       Port: 44444
       Protocol: HTTP
 
-  # SwarmManagerLifecycleHook:
-  #   DependsOn:
-  #     - SwarmManagerAutoScaleGroup
-  #     - SwarmLifecycleQueue
-  #     - SwarmLifecycleQueuePolicy
-  #     - SwarmManagerRole
-  #   Type: AWS::AutoScaling::LifecycleHook
-  #   Properties:
-  #     AutoScalingGroupName: !Ref SwarmManagerAutoScaleGroup
-  #     LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
-  #     NotificationTargetARN: !GetAtt SwarmLifecycleQueue.Arn
-  #     RoleARN: !GetAtt SwarmManagerRole.Arn
+  SwarmManagerLifecycleHook:
+    DependsOn:
+      - SwarmManagerAutoScaleGroup
+      - SwarmLifecycleQueue
+      - SwarmLifecycleQueuePolicy
+      - SwarmManagerRole
+    Type: AWS::AutoScaling::LifecycleHook
+    Properties:
+      AutoScalingGroupName: !Ref SwarmManagerAutoScaleGroup
+      DefaultResult: CONTINUE
+      LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+      NotificationTargetARN: !GetAtt SwarmLifecycleQueue.Arn
+      RoleARN: !GetAtt SwarmManagerRole.Arn
 
 Outputs:
   ManagerSecurityGroupID:
