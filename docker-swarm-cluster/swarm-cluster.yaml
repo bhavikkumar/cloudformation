@@ -183,6 +183,7 @@ Resources:
               - "dynamodb:GetItem"
               - "dynamodb:UpdateItem"
               - "dynamodb:PutItem"
+              - "dynamodb:DeleteItem"
             Resource: !GetAtt SwarmDynamoDBTable.Arn
       Roles:
         - !Ref SwarmManagerRole
@@ -201,6 +202,7 @@ Resources:
             Action:
               - "ec2:CreateTags"
               - "ec2:DescribeTags"
+              - "ec2:DescribeInstances"
             Resource: "*"
       Roles:
         - !Ref SwarmManagerRole
@@ -246,11 +248,11 @@ Resources:
   SwarmHealthCheckTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 10
       HealthCheckPath: /ishealthy
       HealthCheckPort: 44444
       HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 10
+      HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '204'
@@ -438,6 +440,23 @@ Resources:
       LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
       NotificationTargetARN: !GetAtt SwarmLifecycleQueue.Arn
       RoleARN: !GetAtt SwarmManagerRole.Arn
+
+  LifeCycleHookPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-manager-lifecycle-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "autoscaling:CompleteLifecycleAction"
+            Resource: "*"
+      Roles:
+        - !Ref SwarmManagerRole
 
 Outputs:
   ManagerSecurityGroupID:
