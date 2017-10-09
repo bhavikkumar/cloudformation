@@ -73,6 +73,7 @@ Resources:
       EvaluationPeriods: 1
       ComparisonOperator: GreaterThanThreshold
       Threshold: 0
+      Unit: Count
       AlarmActions:
       - !Ref FallbackTopic
       Dimensions:
