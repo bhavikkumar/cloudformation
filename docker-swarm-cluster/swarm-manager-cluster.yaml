@@ -480,26 +480,67 @@ Resources:
       Period: 600
       EvaluationPeriods: 1
       Threshold: 80
+      Unit: Percent
       AlarmActions:
       - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
 
-  GroupTerminatingInstancesTooHigh:
+  # Alarm to catch on going scaling events.
+  GroupPendingInstancesTooHigh:
     Condition: HasAlertTopic
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
-      AlarmDescription: 'High number of terminating instances over the last 15 minutes'
+      AlarmDescription: 'High number of pending instances over the last 15 minutes'
       Namespace: 'AWS/AutoScaling'
       Dimensions:
       - Name: AutoScalingGroupName
         Value: !Ref SwarmManagerAutoScaleGroup
-      MetricName: GroupTerminatingInstances
+      MetricName: GroupPendingInstances
       ComparisonOperator: GreaterThanThreshold
-      Statistic: Average
-      Period: 900
-      EvaluationPeriods: 1
-      Threshold: '0.5'
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 0
+      Unit: Count
       AlarmActions:
       - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+
+  HTTPCodeELB5XXTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Application load balancer returns 5XX HTTP status codes'
+      Namespace: 'AWS/ApplicationELB'
+      MetricName: HTTPCode_ELB_5XX_Count
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Unit: Count
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+      Dimensions:
+      - Name: LoadBalancer
+        Value: !GetAtt SwarmInternalLoadBalancer.LoadBalancerFullName
+
+  HTTPCodeTarget5XXTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Application load balancer receives 5XX HTTP status codes from targets'
+      Namespace: 'AWS/ApplicationELB'
+      MetricName: HTTPCode_Target_5XX_Count
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Unit: Count
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+      Dimensions:
+      - Name: LoadBalancer
+        Value: !GetAtt SwarmInternalLoadBalancer.LoadBalancerFullName
 
 Outputs:
   ManagerSecurityGroupID:
