@@ -1,0 +1,809 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Docker Swarm Manager Cluster across 3 AZs based on Docker for AWS'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentNetworkStack
+      - ParentAlertStack
+    - Label:
+        default: 'Docker Swarm Manager Parameters'
+      Parameters:
+      - KeyName
+      - ManagerInstanceType
+      - ManagerClusterSize
+      - ManagerDiskSize
+      - ManagerDiskType
+
+Parameters:
+  ParentNetworkStack:
+    Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
+    Type: String
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
+    Type: String
+  KeyName:
+    Description: Amazon EC2 Key Pair
+    Type: "AWS::EC2::KeyPair::KeyName"
+  ManagerClusterSize:
+    Description: The number of swarm manager nodes
+    Default: 3
+    Type: Number
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+  ManagerInstanceType:
+    Description: Swarm manager EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m4.10xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - r4.large
+      - r4.xlarge
+      - r4.2xlarge
+      - r4.4xlarge
+      - r4.8xlarge
+      - r4.16xlarge
+      - i3.large
+      - i3.xlarge
+      - i3.2xlarge
+      - i3.4xlarge
+      - i3.8xlarge
+      - i3.16xlarge
+  ManagerDiskSize:
+    Description: Size of Manager's ephemeral storage volume in GiB
+    Type: Number
+    MinValue: 8
+    Default: 20
+    MaxValue: 1024
+  ManagerDiskType:
+    Description: Manager ephemeral storage volume type
+    Type: String
+    Default: gp2
+    AllowedValues:
+      - standard
+      - gp2
+Conditions:
+  HasKeyName: !Not [!Equals [!Ref KeyName, '']]
+  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
+
+Resources:
+  SwarmManagerAsgNotification:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: 'Manager ASG Notifications'
+      TopicName: 'SwarmManagerNotifications'
+
+  SwarmManagerSSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH to the Docker Swarm Managers
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      # Port 22 is temporary, will only be accessible internally in the future.
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
+
+  SwarmClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Docker Swarm Mode Security Groups
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '2377'
+        ToPort: '2377'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '7946'
+        ToPort: '7946'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: udp
+        FromPort: '7946'
+        ToPort: '7946'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '4789'
+        ToPort: '4789'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: udp
+        FromPort: '4789'
+        ToPort: '4789'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '44444'
+        ToPort: '44444'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
+  SwarmDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        -
+          AttributeName: id
+          AttributeType: S
+      KeySchema:
+        -
+          AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      TableName: !Join ['-', [ !Ref "AWS::StackName", dockerswarm ] ]
+
+  SwarmManagerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+                - "autoscaling.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+
+  ManagerDynamoDBPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-manager-dynamodb-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:PutItem"
+              - "dynamodb:DeleteItem"
+            Resource: !GetAtt SwarmDynamoDBTable.Arn
+      Roles:
+        - !Ref SwarmManagerRole
+
+  ManagerEC2Policy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-manager-ec2-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "ec2:CreateTags"
+              - "ec2:DescribeTags"
+              - "ec2:DescribeInstances"
+            Resource: "*"
+      Roles:
+        - !Ref SwarmManagerRole
+
+  SwarmLifecycleQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 14400
+      ReceiveMessageWaitTimeSeconds: 10
+
+  SwarmLifecycleQueuePolicy:
+    DependsOn:
+      - SwarmLifecycleQueue
+      - SwarmManagerRole
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: "swarm-sqs-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "sqs:DeleteMessage"
+              - "sqs:ReceiveMessage"
+              - "sqs:SendMessage"
+              - "sqs:GetQueueUrl"
+              - "sns:Publish"
+            Resource: !GetAtt SwarmLifecycleQueue.Arn
+      Roles:
+        - !Ref SwarmManagerRole
+
+  SwarmManagerInstanceProfile:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref SwarmManagerRole
+
+  # This is used to health check the swarm cluster.
+  SwarmHealthCheckTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /ishealthy
+      HealthCheckPort: 44444
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '204'
+      Name: NodeHealthCheck
+      # This port should only be available internally.
+      Port: 44444
+      Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
+  SwarmManagerLaunchConfiguration:
+    Metadata:
+      Comment: Update, Install Docker and initialise the swarm
+      AWS::CloudFormation::Init:
+        configSets:
+          full_install:
+            - install_cfn
+            - install_docker
+            - init_aws_swarm
+            - swarm_node_healthcheck
+            - guide_aws_swarm
+          update_install:
+            - install_cfn
+        install_cfn:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.SwarmManagerLaunchConfiguration.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmManagerLaunchConfiguration -c update_install --region ${AWS::Region}
+                runas=root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files: [/etc/cfn/cfn-hup.conf, /etc/cfn/hooks.d/cfn-auto-reloader.conf]
+        install_docker:
+          packages:
+            yum:
+              docker: []
+          services:
+            sysvinit:
+              docker:
+                enabled: 'true'
+                ensureRunning: 'true'
+        init_aws_swarm:
+          commands:
+            docker_run:
+              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker depost/init-aws-swarm:latest"
+              env:
+                DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
+              cwd: "~"
+        swarm_node_healthcheck:
+          commands:
+            docker_run:
+              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock depost/swarm-node-healthcheck:latest"
+              cwd: "~"
+        guide_aws_swarm:
+          commands:
+            docker_run:
+              command: "docker run -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker depost/guide-aws-swarm:latest"
+              env:
+                DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
+                LIFECYCLE_QUEUE: { "Ref" : "SwarmLifecycleQueue" }
+              cwd: "~"
+    DependsOn:
+      - SwarmManagerSSHSecurityGroup
+      - SwarmDynamoDBTable
+      - SwarmManagerInstanceProfile
+      - SwarmClusterSecurityGroup
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true
+      BlockDeviceMappings:
+        - DeviceName: "/dev/xvdb"
+          Ebs:
+            VolumeSize: !Ref ManagerDiskSize
+            VolumeType: !Ref ManagerDiskType
+      ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'ManagerInstanceType', Arch]]
+      InstanceType: !Ref ManagerInstanceType
+      IamInstanceProfile: !Ref SwarmManagerInstanceProfile
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
+      SecurityGroups:
+        - !Ref SwarmManagerSSHSecurityGroup
+        - !Ref SwarmClusterSecurityGroup
+      UserData:
+        "Fn::Base64":
+          !Sub |
+            #!/bin/bash -xe
+            yum update -y
+            yum install -y aws-cfn-bootstrap
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmManagerLaunchConfiguration --configsets full_install --region ${AWS::Region}
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource SwarmManagerAutoScaleGroup --region ${AWS::Region}
+
+  SwarmManagerAutoScaleGroup:
+    DependsOn:
+      - SwarmManagerAsgNotification
+      - SwarmManagerLaunchConfiguration
+      - SwarmHealthCheckTargetGroup
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT20M
+        Count: !Ref ManagerClusterSize
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: !Ref ManagerClusterSize
+        PauseTime: PT20M
+        WaitOnResourceSignals: true
+    Properties:
+      MinSize: !Ref ManagerClusterSize
+      MaxSize: 8
+      DesiredCapacity: !Ref ManagerClusterSize
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      LaunchConfigurationName: !Ref SwarmManagerLaunchConfiguration
+      MetricsCollection:
+        - Granularity: 1Minute
+      TargetGroupARNs:
+        - !Ref SwarmHealthCheckTargetGroup
+      VPCZoneIdentifier:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+      NotificationConfigurations:
+      - TopicARN:
+          !Ref SwarmManagerAsgNotification
+        NotificationTypes:
+          - autoscaling:EC2_INSTANCE_LAUNCH
+          - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+          - autoscaling:EC2_INSTANCE_TERMINATE
+          - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+      Tags:
+        -
+          Key: swarm-node-type
+          PropagateAtLaunch: true
+          Value: manager
+
+  SwarmInternalLoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Scheme: internal
+      SecurityGroups:
+        - !Ref SwarmClusterSecurityGroup
+      Subnets:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+
+  SwarmHealthCheckHttpListener:
+    DependsOn:
+      - SwarmHealthCheckTargetGroup
+      - SwarmInternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref SwarmHealthCheckTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref SwarmInternalLoadBalancer
+      Port: 44444
+      Protocol: HTTP
+
+  SwarmManagerLifecycleHook:
+    DependsOn:
+      - SwarmManagerAutoScaleGroup
+      - SwarmLifecycleQueue
+      - SwarmLifecycleQueuePolicy
+      - SwarmManagerRole
+    Type: AWS::AutoScaling::LifecycleHook
+    Properties:
+      AutoScalingGroupName: !Ref SwarmManagerAutoScaleGroup
+      DefaultResult: CONTINUE
+      LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+      NotificationTargetARN: !GetAtt SwarmLifecycleQueue.Arn
+      RoleARN: !GetAtt SwarmManagerRole.Arn
+
+  LifeCycleHookPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-manager-lifecycle-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "autoscaling:CompleteLifecycleAction"
+            Resource: "*"
+      Roles:
+        - !Ref SwarmManagerRole
+
+  CPUUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/EC2'
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref SwarmManagerAutoScaleGroup
+      MetricName: CPUUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+
+  GroupTerminatingInstancesTooHigh:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'High number of terminating instances over the last 15 minutes'
+      Namespace: 'AWS/AutoScaling'
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref SwarmManagerAutoScaleGroup
+      MetricName: GroupTerminatingInstances
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: '0.5'
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+
+Outputs:
+  ManagerSecurityGroupID:
+    Description: SecurityGroup ID of the Swarm Manager
+    Value: !Ref SwarmManagerSSHSecurityGroup
+  ManagerAsgNotificationTopic:
+    Description: The ASG notification topic of managers being started or terminated.
+    Value: !Ref SwarmManagerAsgNotification
+  SwarmSecurityGroup:
+    Description: The security group which allows the Docker Swarm to function.
+    Value: !Ref SwarmClusterSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmClusterSecurityGroup'
+  SwarmTableName:
+    Description: The DynamoDB table name for the swarm cluster
+    Value: !Ref SwarmDynamoDBTable
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmTableName'
+  SwarmTableArn:
+    Description: The DynamoDB Table ARN for the swarm cluster
+    Value: !GetAtt SwarmDynamoDBTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmTableArn'
+  SwarmLifecycleQueue:
+    Description: The Lifecycle SQS Queue which gets instance termination messages
+    Value: !GetAtt SwarmLifecycleQueue.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmLifecycleQueue'
+  SwarmInternalLoadBalancer:
+    Description: The Swarm Internal Load Balancer
+    Value: !Ref SwarmInternalLoadBalancer
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmLoadBalancer'
+
+Mappings:
+  AWSInstanceType2Arch:
+    t1.micro:
+      Arch: PV64
+    t2.nano:
+      Arch: HVM64
+    t2.micro:
+      Arch: HVM64
+    t2.small:
+      Arch: HVM64
+    t2.medium:
+      Arch: HVM64
+    t2.large:
+      Arch: HVM64
+    m1.small:
+      Arch: PV64
+    m1.medium:
+      Arch: PV64
+    m1.large:
+      Arch: PV64
+    m1.xlarge:
+      Arch: PV64
+    m2.xlarge:
+      Arch: PV64
+    m2.2xlarge:
+      Arch: PV64
+    m2.4xlarge:
+      Arch: PV64
+    m3.medium:
+      Arch: HVM64
+    m3.large:
+      Arch: HVM64
+    m3.xlarge:
+      Arch: HVM64
+    m3.2xlarge:
+      Arch: HVM64
+    m4.large:
+      Arch: HVM64
+    m4.xlarge:
+      Arch: HVM64
+    m4.2xlarge:
+      Arch: HVM64
+    m4.4xlarge:
+      Arch: HVM64
+    m4.10xlarge:
+      Arch: HVM64
+    c1.medium:
+      Arch: PV64
+    c1.xlarge:
+      Arch: PV64
+    c3.large:
+      Arch: HVM64
+    c3.xlarge:
+      Arch: HVM64
+    c3.2xlarge:
+      Arch: HVM64
+    c3.4xlarge:
+      Arch: HVM64
+    c3.8xlarge:
+      Arch: HVM64
+    c4.large:
+      Arch: HVM64
+    c4.xlarge:
+      Arch: HVM64
+    c4.2xlarge:
+      Arch: HVM64
+    c4.4xlarge:
+      Arch: HVM64
+    c4.8xlarge:
+      Arch: HVM64
+    g2.2xlarge:
+      Arch: HVMG2
+    g2.8xlarge:
+      Arch: HVMG2
+    r3.large:
+      Arch: HVM64
+    r3.xlarge:
+      Arch: HVM64
+    r3.2xlarge:
+      Arch: HVM64
+    r3.4xlarge:
+      Arch: HVM64
+    r3.8xlarge:
+      Arch: HVM64
+    i2.xlarge:
+      Arch: HVM64
+    i2.2xlarge:
+      Arch: HVM64
+    i2.4xlarge:
+      Arch: HVM64
+    i2.8xlarge:
+      Arch: HVM64
+    d2.xlarge:
+      Arch: HVM64
+    d2.2xlarge:
+      Arch: HVM64
+    d2.4xlarge:
+      Arch: HVM64
+    d2.8xlarge:
+      Arch: HVM64
+    hi1.4xlarge:
+      Arch: HVM64
+    hs1.8xlarge:
+      Arch: HVM64
+    cr1.8xlarge:
+      Arch: HVM64
+    cc2.8xlarge:
+      Arch: HVM64
+  AWSInstanceType2NATArch:
+    t1.micro:
+      Arch: NATPV64
+    t2.nano:
+      Arch: NATHVM64
+    t2.micro:
+      Arch: NATHVM64
+    t2.small:
+      Arch: NATHVM64
+    t2.medium:
+      Arch: NATHVM64
+    t2.large:
+      Arch: NATHVM64
+    m1.small:
+      Arch: NATPV64
+    m1.medium:
+      Arch: NATPV64
+    m1.large:
+      Arch: NATPV64
+    m1.xlarge:
+      Arch: NATPV64
+    m2.xlarge:
+      Arch: NATPV64
+    m2.2xlarge:
+      Arch: NATPV64
+    m2.4xlarge:
+      Arch: NATPV64
+    m3.medium:
+      Arch: NATHVM64
+    m3.large:
+      Arch: NATHVM64
+    m3.xlarge:
+      Arch: NATHVM64
+    m3.2xlarge:
+      Arch: NATHVM64
+    m4.large:
+      Arch: NATHVM64
+    m4.xlarge:
+      Arch: NATHVM64
+    m4.2xlarge:
+      Arch: NATHVM64
+    m4.4xlarge:
+      Arch: NATHVM64
+    m4.10xlarge:
+      Arch: NATHVM64
+    c1.medium:
+      Arch: NATPV64
+    c1.xlarge:
+      Arch: NATPV64
+    c3.large:
+      Arch: NATHVM64
+    c3.xlarge:
+      Arch: NATHVM64
+    c3.2xlarge:
+      Arch: NATHVM64
+    c3.4xlarge:
+      Arch: NATHVM64
+    c3.8xlarge:
+      Arch: NATHVM64
+    c4.large:
+      Arch: NATHVM64
+    c4.xlarge:
+      Arch: NATHVM64
+    c4.2xlarge:
+      Arch: NATHVM64
+    c4.4xlarge:
+      Arch: NATHVM64
+    c4.8xlarge:
+      Arch: NATHVM64
+    g2.2xlarge:
+      Arch: NATHVMG2
+    g2.8xlarge:
+      Arch: NATHVMG2
+    r3.large:
+      Arch: NATHVM64
+    r3.xlarge:
+      Arch: NATHVM64
+    r3.2xlarge:
+      Arch: NATHVM64
+    r3.4xlarge:
+      Arch: NATHVM64
+    r3.8xlarge:
+      Arch: NATHVM64
+    i2.xlarge:
+      Arch: NATHVM64
+    i2.2xlarge:
+      Arch: NATHVM64
+    i2.4xlarge:
+      Arch: NATHVM64
+    i2.8xlarge:
+      Arch: NATHVM64
+    d2.xlarge:
+      Arch: NATHVM64
+    d2.2xlarge:
+      Arch: NATHVM64
+    d2.4xlarge:
+      Arch: NATHVM64
+    d2.8xlarge:
+      Arch: NATHVM64
+    hi1.4xlarge:
+      Arch: NATHVM64
+    hs1.8xlarge:
+      Arch: NATHVM64
+    cr1.8xlarge:
+      Arch: NATHVM64
+    cc2.8xlarge:
+      Arch: NATHVM64
+  # This list comes from https://aws.amazon.com/amazon-linux-ami/
+  AWSRegionArch2AMI:
+    us-east-1:
+      PV64: ami-abc1ebbd
+      HVM64: ami-a4c7edb2
+      HVMG2: ami-a41a3fb3
+    us-east-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-8a7859ef
+      HVMG2: NOT_SUPPORTED
+    us-west-2:
+      PV64: ami-98f3e7e1
+      HVM64: ami-6df1e514
+      HVMG2: ami-caf253aa
+    us-west-1:
+      PV64: ami-347e5254
+      HVM64: ami-327f5352
+      HVMG2: ami-00347e60
+    ca-central-1:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-a7aa15c3
+      HVMG2: NOT_SUPPORTED
+    eu-west-1:
+      PV64: ami-c4bba0a2
+      HVM64: ami-d7b9a2b1
+      HVMG2: ami-e2f7bd91
+    eu-west-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-ed100689
+      HVMG2: NOT_SUPPORTED
+    eu-central-1:
+      PV64: ami-4dbc1a22
+      HVM64: ami-82be18ed
+      HVMG2: ami-d2ff04bd
+    ap-southeast-1:
+      PV64: ami-42901f21
+      HVM64: ami-77af2014
+      HVMG2: ami-f3f95990
+    ap-northeast-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-e21cc38c
+      HVMG2: NOT_SUPPORTED
+    ap-northeast-1:
+      PV64: ami-d3d3c4b4
+      HVM64: ami-3bd3c45c
+      HVMG2: ami-4c78d52d
+    ap-southeast-2:
+      PV64: ami-43918120
+      HVM64: ami-10918173
+      HVMG2: ami-3a122e59
+    ap-south-1:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-47205e28
+      HVMG2: NOT_SUPPORTED
+    sa-east-1:
+      PV64: ami-1cdab170
+      HVM64: ami-87dab1eb
+      HVMG2: NOT_SUPPORTED
