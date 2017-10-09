@@ -345,7 +345,7 @@ Resources:
     Properties:
       AssociatePublicIpAddress: true
       BlockDeviceMappings:
-        - DeviceName: "/dev/xvdb"
+        - DeviceName: "/dev/xvda"
           Ebs:
             VolumeSize: !Ref ManagerDiskSize
             VolumeType: !Ref ManagerDiskType
