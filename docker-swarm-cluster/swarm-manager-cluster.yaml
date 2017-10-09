@@ -5,6 +5,11 @@ Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
     - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentNetworkStack
+      - ParentAlertStack
+    - Label:
         default: 'Docker Swarm Manager Parameters'
       Parameters:
       - KeyName
@@ -12,12 +17,14 @@ Metadata:
       - ManagerClusterSize
       - ManagerDiskSize
       - ManagerDiskType
-    - Label:
-        default: 'VPC Parameters'
-      Parameters:
-      - NetworkStack
 
 Parameters:
+  ParentNetworkStack:
+    Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
+    Type: String
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
+    Type: String
   KeyName:
     Description: Amazon EC2 Key Pair
     Type: "AWS::EC2::KeyPair::KeyName"
@@ -74,9 +81,9 @@ Parameters:
     AllowedValues:
       - standard
       - gp2
-  NetworkStack:
-    Description: The stack name which created the VPC.
-    Type: String
+Conditions:
+  HasKeyName: !Not [!Equals [!Ref KeyName, '']]
+  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
 
 Resources:
   SwarmManagerAsgNotification:
@@ -90,7 +97,7 @@ Resources:
     Properties:
       GroupDescription: Allow SSH to the Docker Swarm Managers
       VpcId:
-        'Fn::ImportValue': !Sub '${NetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
       SecurityGroupIngress:
       # Port 22 is temporary, will only be accessible internally in the future.
       - IpProtocol: tcp
@@ -103,38 +110,38 @@ Resources:
     Properties:
       GroupDescription: Docker Swarm Mode Security Groups
       VpcId:
-        'Fn::ImportValue': !Sub '${NetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: '2377'
         ToPort: '2377'
         CidrIp:
-          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '7946'
         ToPort: '7946'
         CidrIp:
-          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
       - IpProtocol: udp
         FromPort: '7946'
         ToPort: '7946'
         CidrIp:
-          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '4789'
         ToPort: '4789'
         CidrIp:
-          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
       - IpProtocol: udp
         FromPort: '4789'
         ToPort: '4789'
         CidrIp:
-          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '44444'
         ToPort: '44444'
         CidrIp:
-          'Fn::ImportValue': !Sub '${NetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -262,7 +269,7 @@ Resources:
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
-        'Fn::ImportValue': !Sub '${NetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
 
   SwarmManagerLaunchConfiguration:
     Metadata:
@@ -345,7 +352,7 @@ Resources:
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'ManagerInstanceType', Arch]]
       InstanceType: !Ref ManagerInstanceType
       IamInstanceProfile: !Ref SwarmManagerInstanceProfile
-      KeyName: !Ref KeyName
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
       SecurityGroups:
         - !Ref SwarmManagerSSHSecurityGroup
         - !Ref SwarmClusterSecurityGroup
@@ -386,9 +393,9 @@ Resources:
       TargetGroupARNs:
         - !Ref SwarmHealthCheckTargetGroup
       VPCZoneIdentifier:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
       NotificationConfigurations:
       - TopicARN:
           !Ref SwarmManagerAsgNotification
@@ -410,9 +417,9 @@ Resources:
       SecurityGroups:
         - !Ref SwarmClusterSecurityGroup
       Subnets:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${NetworkStack}-SubnetsPublic"] ]
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
 
   SwarmHealthCheckHttpListener:
     DependsOn:
@@ -457,6 +464,42 @@ Resources:
             Resource: "*"
       Roles:
         - !Ref SwarmManagerRole
+
+  CPUUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/EC2'
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref SwarmManagerAutoScaleGroup
+      MetricName: CPUUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+
+  GroupTerminatingInstancesTooHigh:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'High number of terminating instances over the last 15 minutes'
+      Namespace: 'AWS/AutoScaling'
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref SwarmManagerAutoScaleGroup
+      MetricName: GroupTerminatingInstances
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: '0.5'
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
 
 Outputs:
   ManagerSecurityGroupID:
