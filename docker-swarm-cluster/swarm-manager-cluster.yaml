@@ -151,6 +151,14 @@ Resources:
         ToPort: '44444'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
+  ConsulClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group to allow Consul ports
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: '8300'
         ToPort: '8302'
@@ -288,7 +296,8 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
-  # This is used to health check the swarm cluster.
+  # This is used to health check the swarm cluster. We don't actually
+  # allow any traffic to hit this.
   SwarmHealthCheckTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
@@ -308,8 +317,7 @@ Resources:
       VpcId:
         'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
 
-  # This is used to health check the consul
-  ConsulHealthCheckTargetGroup:
+  ConsulTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
       HealthCheckIntervalSeconds: 10
@@ -320,7 +328,7 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: ConsulHealthCheck
+      Name: ConsulCluster
       # This port should only be available internally.
       Port: 8500
       Protocol: HTTP
@@ -426,6 +434,7 @@ Resources:
       - SwarmDynamoDBTable
       - SwarmManagerInstanceProfile
       - SwarmClusterSecurityGroup
+      - ConsulClusterSecurityGroup
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -441,6 +450,7 @@ Resources:
       SecurityGroups:
         - !Ref SwarmManagerSSHSecurityGroup
         - !Ref SwarmClusterSecurityGroup
+        - !Ref ConsulClusterSecurityGroup
       UserData:
         "Fn::Base64":
           !Sub |
@@ -455,7 +465,7 @@ Resources:
       - SwarmManagerAsgNotification
       - SwarmManagerLaunchConfiguration
       - SwarmHealthCheckTargetGroup
-      - ConsulHealthCheckTargetGroup
+      - ConsulTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -478,7 +488,7 @@ Resources:
         - Granularity: 1Minute
       TargetGroupARNs:
         - !Ref SwarmHealthCheckTargetGroup
-        - !Ref ConsulHealthCheckTargetGroup
+        - !Ref ConsulTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
@@ -525,12 +535,12 @@ Resources:
 
   ConsulUiHttpListener:
     DependsOn:
-      - ConsulHealthCheckTargetGroup
+      - ConsulTargetGroup
       - InternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
-      - TargetGroupArn: !Ref ConsulHealthCheckTargetGroup
+      - TargetGroupArn: !Ref ConsulTargetGroup
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8500
@@ -656,6 +666,11 @@ Outputs:
     Value: !Ref SwarmClusterSecurityGroup
     Export:
       Name: !Sub '${AWS::StackName}-SwarmClusterSecurityGroup'
+  ConsulSecurityGroup:
+    Description: The security group which allows the Consul cluster to function
+    Value: !Ref ConsulClusterSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-ConsulClusterSecurityGroup'
   SwarmTableName:
     Description: The DynamoDB table name for the swarm cluster
     Value: !Ref SwarmDynamoDBTable
@@ -676,6 +691,21 @@ Outputs:
     Value: !Ref InternalLoadBalancer
     Export:
       Name: !Sub '${AWS::StackName}-InternalLoadBalancer'
+  InternalLoadBalancerDNS:
+    Description: The DNS of the internal load balancer
+    Value: !GetAtt InternalLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-InternalLoadBalancerDNS'
+  ConsulTargetGroup:
+    Description: The Consul Cluster target group
+    Value: !Ref ConsulTargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-ConsulTargetGroup'
+  SwarmHealthCheckTargetGroup:
+    Description: The Docker Swarm healthcheck target group
+    Value: !Ref SwarmHealthCheckTargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SwarmHealthCheckTargetGroup'
 
 Mappings:
   AWSInstanceType2Arch:
