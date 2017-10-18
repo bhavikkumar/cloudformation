@@ -175,6 +175,24 @@ Resources:
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
+  VaultClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group to allow vault ports
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '8200'
+        ToPort: '8200'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '8201'
+        ToPort: '8201'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
   InternalLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -185,6 +203,11 @@ Resources:
       - IpProtocol: tcp
         FromPort: '8500'
         ToPort: '8500'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '8200'
+        ToPort: '8200'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
@@ -203,6 +226,22 @@ Resources:
         ReadCapacityUnits: 1
         WriteCapacityUnits: 1
       TableName: !Join ['-', [ !Ref "AWS::StackName", dockerswarm ] ]
+
+  VaultDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        -
+          AttributeName: id
+          AttributeType: S
+      KeySchema:
+        -
+          AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      TableName: !Join ['-', [ !Ref "AWS::StackName", vault ] ]
 
   SwarmManagerRole:
     Type: AWS::IAM::Role
@@ -237,6 +276,24 @@ Resources:
               - "dynamodb:PutItem"
               - "dynamodb:DeleteItem"
             Resource: !GetAtt SwarmDynamoDBTable.Arn
+      Roles:
+        - !Ref SwarmManagerRole
+
+  VaultDynamoDBPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "vault-dynamodb-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:PutItem"
+            Resource: !GetAtt VaultDynamoDBTable.Arn
       Roles:
         - !Ref SwarmManagerRole
 
@@ -336,6 +393,25 @@ Resources:
       VpcId:
         'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
 
+  VaultTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /v1/sys/health
+      HealthCheckPort: 8200
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200,429'
+      Name: VaultCluster
+      # This port should only be available internally.
+      Port: 8200
+      Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
@@ -348,6 +424,7 @@ Resources:
             - swarm_node_healthcheck
             - guide_aws_swarm
             - consul
+            - vault
           update_install:
             - install_cfn
         install_cfn:
@@ -427,14 +504,44 @@ Resources:
             config_file_permission:
               command: "chmod 644 /opt/consul/config.json"
             docker_run:
-              command: "sudo docker run -d --name consul --net=host --restart=always -e 'CONSUL_BIND_INTERFACE=eth0' -v /opt/consul:/consul/config consul agent -ui -server"
+              command: "docker run -d --name consul --net=host --restart=always -e 'CONSUL_BIND_INTERFACE=eth0' -v /opt/consul:/consul/config consul agent -ui -server"
+              cwd: "~"
+        vault:
+          files:
+            /opt/vault/vault.hcl:
+              content: !Sub |
+                backend "consul" {
+                  address = "127.0.0.1:8500"
+                  path = "vault"
+                  scheme="http"
+                  redirect_addr="http://${InternalLoadBalancer.DNSName}:8200"
+                }
+                listener "tcp" {
+                  address = "0.0.0.0:8200"
+                  tls_disable = 1
+                }
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            config_file_permission:
+              command: "chmod 644 /opt/vault/vault.hcl"
+            docker_run:
+              command: "docker run -d --name vault --net=host --restart=always -e 'VAULT_REDIRECT_INTERFACE=eth0' -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
+              cwd: "~"
+            init_vault:
+              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' depost/init-vault:latest"
+              env:
+                DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
     DependsOn:
       - SwarmManagerSSHSecurityGroup
       - SwarmDynamoDBTable
+      - VaultDynamoDBTable
       - SwarmManagerInstanceProfile
       - SwarmClusterSecurityGroup
       - ConsulClusterSecurityGroup
+      - VaultClusterSecurityGroup
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -451,6 +558,7 @@ Resources:
         - !Ref SwarmManagerSSHSecurityGroup
         - !Ref SwarmClusterSecurityGroup
         - !Ref ConsulClusterSecurityGroup
+        - !Ref VaultClusterSecurityGroup
       UserData:
         "Fn::Base64":
           !Sub |
@@ -466,6 +574,7 @@ Resources:
       - SwarmManagerLaunchConfiguration
       - SwarmHealthCheckTargetGroup
       - ConsulTargetGroup
+      - VaultTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -489,6 +598,7 @@ Resources:
       TargetGroupARNs:
         - !Ref SwarmHealthCheckTargetGroup
         - !Ref ConsulTargetGroup
+        - !Ref VaultTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
@@ -544,6 +654,19 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8500
+      Protocol: HTTP
+
+  VaultHttpListener:
+    DependsOn:
+      - VaultTargetGroup
+      - InternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref VaultTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref InternalLoadBalancer
+      Port: 8200
       Protocol: HTTP
 
   SwarmManagerLifecycleHook:
@@ -602,6 +725,7 @@ Resources:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
       AlarmDescription: 'High number of pending instances over the last 15 minutes'
+      TreatMissingData: notBreaching
       Namespace: 'AWS/AutoScaling'
       Dimensions:
       - Name: AutoScalingGroupName
@@ -621,6 +745,7 @@ Resources:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
       AlarmDescription: 'Application load balancer returns 5XX HTTP status codes'
+      TreatMissingData: notBreaching
       Namespace: 'AWS/ApplicationELB'
       MetricName: HTTPCode_ELB_5XX_Count
       Statistic: Sum
@@ -640,6 +765,7 @@ Resources:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
       AlarmDescription: 'Application load balancer receives 5XX HTTP status codes from targets'
+      TreatMissingData: notBreaching
       Namespace: 'AWS/ApplicationELB'
       MetricName: HTTPCode_Target_5XX_Count
       Statistic: Sum
