@@ -210,6 +210,11 @@ Resources:
         ToPort: '8200'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '8201'
+        ToPort: '8201'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -366,7 +371,7 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '204'
-      Name: NodeHealthCheck
+      Name: !Join ['-', [ !Ref "AWS::StackName", NodeHealthCheck ] ]
       # This port should only be available internally.
       Port: 44444
       Protocol: HTTP
@@ -385,7 +390,7 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: ConsulCluster
+      Name: !Join ['-', [ !Ref "AWS::StackName", ConsulCluster ] ]
       # This port should only be available internally.
       Port: 8500
       Protocol: HTTP
@@ -404,9 +409,28 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200,429'
-      Name: VaultCluster
+      Name: !Join ['-', [ !Ref "AWS::StackName", Vault ] ]
       # This port should only be available internally.
       Port: 8200
+      Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
+  VaultClusterTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /v1/sys/health
+      HealthCheckPort: 8200
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200,429'
+      Name: !Join ['-', [ !Ref "AWS::StackName", VaultCluster ] ]
+      # This port should only be available internally.
+      Port: 8201
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
@@ -514,7 +538,6 @@ Resources:
                   address = "127.0.0.1:8500"
                   path = "vault"
                   scheme="http"
-                  redirect_addr="http://${InternalLoadBalancer.DNSName}:8200"
                 }
                 listener "tcp" {
                   address = "0.0.0.0:8200"
@@ -527,7 +550,9 @@ Resources:
             config_file_permission:
               command: "chmod 644 /opt/vault/vault.hcl"
             docker_run:
-              command: "docker run -d --name vault --net=host --restart=always -e 'VAULT_REDIRECT_INTERFACE=eth0' -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
+              command: "docker run -d --name vault --net=host --restart=always -e 'VAULT_REDIRECT_INTERFACE=eth0' -e VAULT_CLUSTER_ADDR=$VAULT_CLUSTER_ADDR -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
+              env:
+                VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
               cwd: "~"
             init_vault:
               command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' depost/init-vault:latest"
@@ -575,16 +600,17 @@ Resources:
       - SwarmHealthCheckTargetGroup
       - ConsulTargetGroup
       - VaultTargetGroup
+      - VaultClusterTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
-        Timeout: PT20M
+        Timeout: PT10M
         Count: !Ref ManagerClusterSize
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MaxBatchSize: 1
         MinInstancesInService: !Ref ManagerClusterSize
-        PauseTime: PT20M
+        PauseTime: PT10M
         WaitOnResourceSignals: true
     Properties:
       MinSize: !Ref ManagerClusterSize
@@ -599,6 +625,7 @@ Resources:
         - !Ref SwarmHealthCheckTargetGroup
         - !Ref ConsulTargetGroup
         - !Ref VaultTargetGroup
+        - !Ref VaultClusterTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
@@ -667,6 +694,19 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8200
+      Protocol: HTTP
+
+  VaultClusterHttpListener:
+    DependsOn:
+      - VaultClusterTargetGroup
+      - InternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref VaultClusterTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref InternalLoadBalancer
+      Port: 8201
       Protocol: HTTP
 
   SwarmManagerLifecycleHook:
