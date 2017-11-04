@@ -21,6 +21,11 @@ Metadata:
         default: 'Consul Parameters'
       Parameters:
       - EncryptionToken
+    - Label:
+        default: 'TLS Certificate Parameters'
+      Parameters:
+      - CertificateS3Bucket
+      - CertificateFileName
 
 Parameters:
   ParentNetworkStack:
@@ -88,6 +93,12 @@ Parameters:
   EncryptionToken:
     NoEcho: true
     Description: 'Secret key to use for encryption of Consul network traffic. This key must be 16-bytes that are Base64-encoded'
+    Type: String
+  CertificateS3Bucket:
+    Description: 'Secure S3 Bucket which contains the required certificates'
+    Type: String
+  CertificateFileName:
+    Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
     Type: String
 
 Conditions:
@@ -321,6 +332,23 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
+  CertificateBucketPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-manager-certificate-download-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub 'arn:aws:s3:::${CertificateS3Bucket}/*'
+      Roles:
+        - !Ref SwarmManagerRole
+
   SwarmLifecycleQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -439,6 +467,13 @@ Resources:
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
+      AWS::CloudFormation::Authentication:
+        rolebased:
+          type: "S3"
+          buckets:
+            - !Ref CertificateS3Bucket
+          roleName:
+            Ref: SwarmManagerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
@@ -449,8 +484,10 @@ Resources:
             - guide_aws_swarm
             - consul
             - vault
+            - certificates
           update_install:
             - install_cfn
+            - certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -559,6 +596,12 @@ Resources:
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
+        certificates:
+          sources:
+            /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
+          commands:
+            config_file_permission:
+              command: "chmod 400 /opt/certificates/*"
     DependsOn:
       - SwarmManagerSSHSecurityGroup
       - SwarmDynamoDBTable
