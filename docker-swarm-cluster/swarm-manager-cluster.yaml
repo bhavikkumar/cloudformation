@@ -9,6 +9,7 @@ Metadata:
       Parameters:
       - ParentNetworkStack
       - ParentAlertStack
+      - ParentZoneStack
     - Label:
         default: 'Docker Swarm Manager Parameters'
       Parameters:
@@ -26,14 +27,28 @@ Metadata:
       Parameters:
       - CertificateS3Bucket
       - CertificateFileName
+      - LoadBalancerCertificateArn
+    - Label:
+        default: 'Docker Registry Parameters'
+      Parameters:
+      - RegistrySubDomainName
+      - RegistryAuthSubDomainName
+      - RegistrySecret
+      - GitHubOrganisation
+      - GitHubClientId
+      - GitHubClientSecret
 
 Parameters:
   ParentNetworkStack:
     Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
     Type: String
   ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
+    Description: 'Stack name of parent alert stack based on operations/alert.yaml template.'
     Type: String
+  ParentZoneStack:
+    Description: 'Stack name of parent zone stack based on dns/route53-hosted-zone.yaml template.'
+    Type: String
+    Default: ''
   KeyName:
     Description: Amazon EC2 Key Pair
     Type: "AWS::EC2::KeyPair::KeyName"
@@ -100,12 +115,41 @@ Parameters:
   CertificateFileName:
     Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
     Type: String
+  LoadBalancerCertificateArn:
+    Description: 'Amazon Resource Name (ARN) of the certificate to associate with the load balancer.'
+    Type: String
+  RegistrySubDomainName:
+    Description: 'Name that is used to create the DNS entry ${SubDomainName}.${HostedZoneName}'
+    Type: String
+    Default: ''
+  RegistryAuthSubDomainName:
+    Description: 'Name that is used to create the DNS entry ${SubDomainName}.${HostedZoneName}'
+    Type: String
+    Default: ''
+  RegistrySecret:
+    NoEcho: true
+    Description: 'Secret is required when operating multiple registries behind a load balancer'
+    Type: String
+  GitHubOrganisation:
+    Description: 'The GitHub organisation which will be used for authentication to the docker registry'
+    Type: String
+  GitHubClientId:
+    Description: 'The GitHub Client Id as under OAuth Apps for the organisation'
+    Type: String
+  GitHubClientSecret:
+    NoEcho: true
+    Description: 'The GitHub Client Secret as under OAuth Apps for the organisation'
+    Type: String
 
 Conditions:
   HasKeyName: !Not [!Equals [!Ref KeyName, '']]
   HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
 
 Resources:
+  RegistryBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+
   SwarmManagerAsgNotification:
     Type: AWS::SNS::Topic
     Properties:
@@ -204,6 +248,24 @@ Resources:
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
+  RegistrySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group to allow registry and registry auth
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '5000'
+        ToPort: '5000'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '5001'
+        ToPort: '5001'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
   InternalLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -226,6 +288,18 @@ Resources:
         ToPort: '8201'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
+  ExternalLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTPS traffic to the external load balancer
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: '0.0.0.0/0'
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -349,6 +423,51 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
+  RegistryBucketPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "allow-registry-to-use-s3"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Deny"
+            Action:
+              - "s3:PutObject"
+            Resource: !Sub 'arn:aws:s3:::${RegistryBucket}/*'
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption:
+                  - 'AES256'
+          -
+            Effect: "Deny"
+            Action:
+              - "s3:PutObject"
+            Resource: !Sub 'arn:aws:s3:::${RegistryBucket}/*'
+            Condition:
+              'Null':
+                s3:x-amz-server-side-encryption: true
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetBucketLocation"
+              - "s3:ListBucketMultipartUploads"
+            Resource: !Sub 'arn:aws:s3:::${RegistryBucket}'
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:PutObject"
+              - "s3:GetObject"
+              - "s3:DeleteObject"
+              - "s3:ListMultipartUploadParts"
+              - "s3:AbortMultipartUpload"
+            Resource: !Sub 'arn:aws:s3:::${RegistryBucket}/*'
+      Roles:
+        - !Ref SwarmManagerRole
+
   SwarmLifecycleQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -464,6 +583,82 @@ Resources:
       VpcId:
         'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
 
+  RegistryTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /v2/
+      HealthCheckPort: 5000
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200,401'
+      Name: !Join ['-', [ !Ref "AWS::StackName", Registry ] ]
+      # This port should only be available internally.
+      Port: 5000
+      Protocol: HTTPS
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
+  RegistryAuthTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckPort: 5001
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Join ['-', [ !Ref "AWS::StackName", RegistryAuth ] ]
+      # This port should only be available internally.
+      Port: 5001
+      Protocol: HTTPS
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
+  ExternalLoadBalancer:
+    DependsOn:
+      - ExternalLoadBalancerSecurityGroup
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      SecurityGroups:
+        - !Ref ExternalLoadBalancerSecurityGroup
+      Subnets:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+
+  RegistryRecordSet:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentZoneStack}-HostedZoneId'
+      Comment: Zone alias targeted to External ALB
+      RecordSets:
+      - Name: !Ref RegistrySubDomainName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ExternalLoadBalancer.DNSName
+
+  RegistryAuthRecordSet:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentZoneStack}-HostedZoneId'
+      Comment: Zone alias targeted to External ALB
+      RecordSets:
+      - Name: !Ref RegistryAuthSubDomainName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ExternalLoadBalancer.DNSName
+
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
@@ -485,6 +680,8 @@ Resources:
             - consul
             - vault
             - certificates
+            - registry
+            - registry_auth
           update_install:
             - install_cfn
             - certificates
@@ -602,6 +799,84 @@ Resources:
           commands:
             config_file_permission:
               command: "chmod 400 /opt/certificates/*"
+        registry:
+          files:
+            /opt/registry/config.yaml:
+              content: !Sub |
+                version: 0.1
+                log:
+                  level: debug
+                  fields:
+                    service: registry
+                storage:
+                  s3:
+                    region: ${AWS::Region}
+                    bucket: ${RegistryBucket}
+                    encrypt: true
+                  maintenance:
+                    uploadpurging:
+                      enabled: true
+                      age: 168h
+                      interval: 24h
+                      dryrun: false
+                auth:
+                  token:
+                    realm: https://${RegistryAuthSubDomainName}/auth
+                    service: ${RegistrySubDomainName}
+                    issuer: ${RegistrySubDomainName}
+                    rootcertbundle: /opt/certificates/auth.crt
+                http:
+                  addr: :5000
+                  secret: ${RegistrySecret}
+                  tls:
+                    certificate: /opt/certificates/fullchain.pem
+                    key: /opt/certificates/privkey.pem
+                  headers:
+                    X-Content-Type-Options: [nosniff]
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            config_file_permission:
+              command: "chmod 644 /opt/registry/config.yaml"
+            docker_run:
+              command: "docker run -d -p 5000:5000 --restart=always --name registry -v /opt/registry/config.yaml:/etc/docker/registry/config.yml:ro -v /opt/certificates:/opt/certificates:ro registry:2"
+              cwd: "~"
+        # This docker_auth is just for demo purposes. Production system should have one which supports clustering.
+        registry_auth:
+          files:
+            /opt/registry/registry_auth.yaml:
+              content: !Sub |
+                server:
+                  addr: ":5001"
+                  certificate: "/data/sslcache/fullchain.pem"
+                  key: "/data/sslcache/privkey.pem"
+                token:  # Settings for the tokens.
+                  issuer: ${RegistrySubDomainName}
+                  expiration: 900
+                  certificate: "/data/sslcache/auth.crt"
+                  key: "/data/sslcache/auth.key"
+                github_auth:
+                  organization: "${GitHubOrganisation}"
+                  client_id: "${GitHubClientId}"
+                  client_secret: "${GitHubClientSecret}"
+                  token_db: "/data/github_tokens.ldb"
+                  http_timeout: "10s"
+                  revalidate_after: "1h"
+                acl:
+                  - match: {account: "/.+/"}
+                    actions: ["*"]
+                    comment: "Logged in users can do anything."
+                  # Access is denied by default.
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            config_file_permission:
+              command: "chmod 644 /opt/registry/registry_auth.yaml"
+            docker_run:
+              command: "docker run -d --restart=always --name docker_auth -p 5001:5001 -v /opt/registry/registry_auth.yaml:/config/registry_auth.yaml:ro -v /opt/certificates:/data/sslcache cesanta/docker_auth:latest /config/registry_auth.yaml"
+              cwd: "~"
     DependsOn:
       - SwarmManagerSSHSecurityGroup
       - SwarmDynamoDBTable
@@ -610,6 +885,8 @@ Resources:
       - SwarmClusterSecurityGroup
       - ConsulClusterSecurityGroup
       - VaultClusterSecurityGroup
+      - RegistrySecurityGroup
+      - RegistryBucket
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -627,6 +904,7 @@ Resources:
         - !Ref SwarmClusterSecurityGroup
         - !Ref ConsulClusterSecurityGroup
         - !Ref VaultClusterSecurityGroup
+        - !Ref RegistrySecurityGroup
       UserData:
         "Fn::Base64":
           !Sub |
@@ -644,6 +922,8 @@ Resources:
       - ConsulTargetGroup
       - VaultTargetGroup
       - VaultClusterTargetGroup
+      - RegistryTargetGroup
+      - RegistryAuthTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -669,6 +949,8 @@ Resources:
         - !Ref ConsulTargetGroup
         - !Ref VaultTargetGroup
         - !Ref VaultClusterTargetGroup
+        - !Ref RegistryTargetGroup
+        - !Ref RegistryAuthTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
@@ -751,6 +1033,50 @@ Resources:
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8201
       Protocol: HTTP
+
+  ExternalHttpsListener:
+    DependsOn:
+      - RegistryTargetGroup
+      - ExternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      Certificates:
+      - CertificateArn: !Ref LoadBalancerCertificateArn
+      DefaultActions:
+      - TargetGroupArn: !Ref RegistryTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS-1-2-2017-01
+
+  RegistryListenerRule:
+    Type: "AWS::ElasticLoadBalancingV2::ListenerRule"
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: RegistryTargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+          - !Ref RegistrySubDomainName
+      ListenerArn: !Ref ExternalHttpsListener
+      Priority: 2
+
+  RegistryAuthListenerRule:
+    Type: "AWS::ElasticLoadBalancingV2::ListenerRule"
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: RegistryAuthTargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+          - !Ref RegistryAuthSubDomainName
+      ListenerArn: !Ref ExternalHttpsListener
+      Priority: 3
 
   SwarmManagerLifecycleHook:
     DependsOn:
@@ -870,16 +1196,6 @@ Outputs:
   ManagerAsgNotificationTopic:
     Description: The ASG notification topic of managers being started or terminated.
     Value: !Ref SwarmManagerAsgNotification
-  SwarmSecurityGroup:
-    Description: The security group which allows the Docker Swarm to function.
-    Value: !Ref SwarmClusterSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-SwarmClusterSecurityGroup'
-  ConsulSecurityGroup:
-    Description: The security group which allows the Consul cluster to function
-    Value: !Ref ConsulClusterSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-ConsulClusterSecurityGroup'
   SwarmTableName:
     Description: The DynamoDB table name for the swarm cluster
     Value: !Ref SwarmDynamoDBTable
@@ -890,6 +1206,16 @@ Outputs:
     Value: !GetAtt SwarmDynamoDBTable.Arn
     Export:
       Name: !Sub '${AWS::StackName}-SwarmTableArn'
+  VaultTableName:
+    Description: The DynamoDB table name used by vault
+    Value: !Ref VaultDynamoDBTable
+    Export:
+      Name: !Sub '${AWS::StackName}-VaultTableName'
+  VaultTableArn:
+    Description: The DynamoDB Table ARN used by vault
+    Value: !GetAtt VaultDynamoDBTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-VaultTableArn'
   SwarmLifecycleQueue:
     Description: The Lifecycle SQS Queue which gets instance termination messages
     Value: !GetAtt SwarmLifecycleQueue.Arn
@@ -905,16 +1231,17 @@ Outputs:
     Value: !GetAtt InternalLoadBalancer.DNSName
     Export:
       Name: !Sub '${AWS::StackName}-InternalLoadBalancerDNS'
-  ConsulTargetGroup:
-    Description: The Consul Cluster target group
-    Value: !Ref ConsulTargetGroup
+  ExternalLoadBalancer:
+    Description: The External Load Balancer
+    Value: !Ref ExternalLoadBalancer
     Export:
-      Name: !Sub '${AWS::StackName}-ConsulTargetGroup'
-  SwarmHealthCheckTargetGroup:
-    Description: The Docker Swarm healthcheck target group
-    Value: !Ref SwarmHealthCheckTargetGroup
+      Name: !Sub '${AWS::StackName}-ExternalLoadBalancer'
+  ExternalLoadBalancerDNS:
+    Description: The DNS of the external load balancer
+    Value: !GetAtt ExternalLoadBalancer.DNSName
     Export:
-      Name: !Sub '${AWS::StackName}-SwarmHealthCheckTargetGroup'
+      Name: !Sub '${AWS::StackName}-ExternalLoadBalancerDNS'
+
 
 Mappings:
   AWSInstanceType2Arch:
