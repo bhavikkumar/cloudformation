@@ -545,27 +545,75 @@ Resources:
             /opt/consul/config.json:
               content: !Sub |
                 {
+                  "advertise_addr" : "{{ GetInterfaceIP \"eth0\" }}",
+                  "bind_addr": "{{ GetInterfaceIP \"eth0\" }}",
+                  "client_addr": "0.0.0.0",
+                  "data_dir": "/consul/data",
                   "datacenter": "${AWS::Region}",
-                  "log_level": "INFO",
-                  "server": true,
+                  "leave_on_terminate" : true,
+                  "retry_join" : [
+                    "consul.server"
+                  ],
+                  "server_name" : "server.${AWS::Region}.consul",
+                  "skip_leave_on_interrupt" : true,
+                  "bootstrap_expect": ${ManagerClusterSize},
+                  "server" : true,
+                  "ui" : true,
                   "autopilot": {
                     "cleanup_dead_servers": true
                   },
-                  "retry_join": ["provider=aws tag_key=swarm-node-type tag_value=manager"],
-                  "bootstrap_expect": ${ManagerClusterSize},
-                  "leave_on_terminate": true,
-                  "raft_protocol": 3,
-                  "client_addr": "0.0.0.0",
+                  "disable_update_check": true,
+                  "log_level": "INFO",
                   "encrypt": "${EncryptionToken}"
                 }
+              mode: '000755'
+              owner: root
+              group: root
+            /opt/consul/compose.yaml:
+              content: !Sub |
+                ---
+                version: '3.3'
+                networks:
+                  consul-network:
+                services:
+                  server:
+                    image: consul:latest
+                    networks:
+                      consul-network:
+                        aliases:
+                          - consul.server
+                    command: "consul agent -config-file /consul/config/config.json"
+                    ports:
+                      - target: 8500
+                        published: 8500
+                        mode: host
+                    volumes:
+                      - /opt/consul:/consul/config
+                    deploy:
+                      mode: replicated
+                      replicas: 3
+                      endpoint_mode: dnsrr
+                      update_config:
+                        parallelism: 1
+                        failure_action: rollback
+                        delay: 30s
+                      restart_policy:
+                        condition: any
+                        delay: 5s
+                        window: 120s
+                      placement:
+                        constraints:
+                          - node.role == manager
               mode: '000755'
               owner: root
               group: root
           commands:
             config_file_permission:
               command: "chmod 644 /opt/consul/config.json"
+            compose_file_permission:
+              command: "chmod 644 /opt/consul/compose.yaml"
             docker_run:
-              command: "docker run -d --name consul --net=host --restart=always -e 'CONSUL_BIND_INTERFACE=eth0' -v /opt/consul:/consul/config consul agent -ui -server"
+              command: "docker stack deploy -c /opt/consul/compose.yaml consul"
               cwd: "~"
         vault:
           files:
@@ -647,13 +695,13 @@ Resources:
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
-        Timeout: PT10M
+        Timeout: PT20M
         Count: !Ref ManagerClusterSize
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MaxBatchSize: 1
         MinInstancesInService: !Ref ManagerClusterSize
-        PauseTime: PT10M
+        PauseTime: PT20M
         WaitOnResourceSignals: true
     Properties:
       MinSize: !Ref ManagerClusterSize
