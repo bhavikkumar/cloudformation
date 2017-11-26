@@ -563,7 +563,7 @@ Resources:
                     "cleanup_dead_servers": true
                   },
                   "disable_update_check": true,
-                  "log_level": "INFO",
+                  "log_level": "warn",
                   "encrypt": "${EncryptionToken}"
                 }
               mode: '000755'
