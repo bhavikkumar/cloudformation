@@ -772,10 +772,10 @@ Resources:
                     bind *:80{{range $i,$a:=services}}{{$path:=.Name}}{{range .Tags}}{{if eq . "edge"}}
                     acl app{{$i}} path_beg -i /{{$path}}{{end}}{{end}}{{end}}
                     {{range $i,$a:=services}}{{range .Tags}}{{if eq . "edge"}}
-                    use_backend{{$a.Name}} if app{{$i}}{{end}}{{end}}{{end}}
+                    use_backend {{$a.Name}} if app{{$i}}{{end}}{{end}}{{end}}
 
                 {{range $i,$a:=services}}{{$path:=.Name}}{{range .Tags}}{{if eq . "edge"}}
-                backend{{$a.Name}}
+                backend {{$a.Name}}
                     mode http
                     balance roundrobin
                     option forwardfor
