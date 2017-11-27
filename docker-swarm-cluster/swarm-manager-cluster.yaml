@@ -26,6 +26,10 @@ Metadata:
       Parameters:
       - CertificateS3Bucket
       - CertificateFileName
+    - Label:
+        default: 'HA Proxy Parameters'
+      Parameters:
+      - HAProxyPassword
 
 Parameters:
   ParentNetworkStack:
@@ -99,6 +103,10 @@ Parameters:
     Type: String
   CertificateFileName:
     Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
+    Type: String
+  HAProxyPassword:
+    NoEcho: true
+    Description: 'Password for HA Proxy Stats endpoint'
     Type: String
 
 Conditions:
@@ -204,6 +212,37 @@ Resources:
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
+  HAProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group to allow HTTP/HTTPS traffic
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
+  HAProxyStatsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group to allow HTTP/HTTPS traffic
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '1936'
+        ToPort: '1936'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
   InternalLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -224,6 +263,16 @@ Resources:
       - IpProtocol: tcp
         FromPort: '8201'
         ToPort: '8201'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '1936'
+        ToPort: '1936'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
@@ -464,6 +513,42 @@ Resources:
       VpcId:
         'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
 
+  HAProxyHttpTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /healthcheck
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Join ['-', [ !Ref "AWS::StackName", HAProxyCluster ] ]
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
+  HAProxyStatsTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /healthcheck
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Join ['-', [ !Ref "AWS::StackName", HAProxyStatsCluster ] ]
+      Port: 1936
+      Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
@@ -485,6 +570,7 @@ Resources:
             - consul
             - vault
             - certificates
+            - haproxy
           update_install:
             - install_cfn
             - certificates
@@ -574,12 +660,13 @@ Resources:
                 ---
                 version: '3.3'
                 networks:
-                  consul-network:
+                  depost:
+                    external: true
                 services:
                   server:
                     image: consul:latest
                     networks:
-                      consul-network:
+                      depost:
                         aliases:
                           - consul.server
                     command: "consul agent -config-file /consul/config/config.json"
@@ -612,6 +699,8 @@ Resources:
               command: "chmod 644 /opt/consul/config.json"
             compose_file_permission:
               command: "chmod 644 /opt/consul/compose.yaml"
+            create_default_network:
+              command: "docker network create -d overlay --subnet=192.168.0.0/16 depost"
             docker_run:
               command: "docker stack deploy -c /opt/consul/compose.yaml consul"
               cwd: "~"
@@ -650,6 +739,109 @@ Resources:
           commands:
             config_file_permission:
               command: "chmod 400 /opt/certificates/*"
+        haproxy:
+          files:
+            /opt/haproxy/haproxy.json:
+              content:
+                template {
+                  source = "/tmp/haproxy.ctmpl"
+                  destination = "/etc/haproxy/haproxy.cfg"
+                  command = "haproxy -f /etc/haproxy/haproxy.cfg -sf $(pidof haproxy) &"
+                }
+              mode: '000755'
+              owner: root
+              group: root
+            /opt/haproxy/haproxy.ctmpl:
+              content: !Sub |
+                global
+                    debug
+                    stats timeout 30s
+                    maxconn 1024
+
+                defaults
+                    log global
+                    option httplog
+                    option dontlognull
+                    mode http
+                    timeout connect 5000
+                    timeout client  50000
+                    timeout server  50000
+                    monitor-uri /healthcheck
+
+                frontend http-in
+                    bind *:80{{range $i,$a:=services}}{{$path:=.Name}}{{range .Tags}}{{if eq . "edge"}}
+                    acl app{{$i}} path_beg -i /{{$path}}{{end}}{{end}}{{end}}
+                    {{range $i,$a:=services}}{{range .Tags}}{{if eq . "edge"}}
+                    use_backend{{$a.Name}} if app{{$i}}{{end}}{{end}}{{end}}
+
+                {{range $i,$a:=services}}{{$path:=.Name}}{{range .Tags}}{{if eq . "edge"}}
+                backend{{$a.Name}}
+                    mode http
+                    balance roundrobin
+                    option forwardfor
+                    option httpchk get /healthcheck
+                    http-check expect ! rstatus ^5
+                    default-server inter 2s fall 1 rise 2
+                    reqrep ^([^\ ]*\ /){{$path}}[/]?(.*)     \1\2{{range $c,$d:=service $a.Name}}
+                    server {{.Address}} {{.Address}}:{{.Port}} check{{end}}{{end}}{{end}}{{end}}
+
+                listen stats
+                    bind 0.0.0.0:1936
+                    stats enable
+                    stats uri /
+                    stats hide-version
+                    stats auth admin:${HAProxyPassword}
+              mode: '000755'
+              owner: root
+              group: root
+            /opt/haproxy/compose.yaml:
+              content: !Sub |
+                ---
+                version: '3.3'
+                networks:
+                  depost:
+                    external: true
+                services:
+                  server:
+                    image: sirile/haproxy
+                    networks:
+                      depost:
+                        aliases:
+                          - haproxy.server
+                    command: "-consul=consul.server:8500"
+                    ports:
+                      - target: 80
+                        published: 80
+                        mode: host
+                      - target: 1936
+                        published: 1936
+                        mode: host
+                    volumes:
+                      - /opt/haproxy:/tmp
+                    deploy:
+                      mode: global
+                      endpoint_mode: dnsrr
+                      update_config:
+                        parallelism: 1
+                        failure_action: rollback
+                        delay: 30s
+                      restart_policy:
+                        condition: any
+                        delay: 5s
+                        window: 120s
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            config_file_permission:
+              command: "chmod 644 /opt/haproxy/haproxy.json"
+            consul_template_file_permission:
+              command: "chmod 644 /opt/haproxy/haproxy.ctmpl"
+            compose_file_permission:
+              command: "chmod 644 /opt/haproxy/compose.yaml"
+            docker_run:
+              command: "docker stack deploy -c /opt/haproxy/compose.yaml haproxy"
+              cwd: "~"
     DependsOn:
       - SwarmManagerSSHSecurityGroup
       - SwarmDynamoDBTable
@@ -658,6 +850,8 @@ Resources:
       - SwarmClusterSecurityGroup
       - ConsulClusterSecurityGroup
       - VaultClusterSecurityGroup
+      - HAProxySecurityGroup
+      - HAProxyStatsSecurityGroup
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -675,6 +869,8 @@ Resources:
         - !Ref SwarmClusterSecurityGroup
         - !Ref ConsulClusterSecurityGroup
         - !Ref VaultClusterSecurityGroup
+        - !Ref HAProxySecurityGroup
+        - !Ref HAProxyStatsSecurityGroup
       UserData:
         "Fn::Base64":
           !Sub |
@@ -692,6 +888,8 @@ Resources:
       - ConsulTargetGroup
       - VaultTargetGroup
       - VaultClusterTargetGroup
+      - HAProxyHttpTargetGroup
+      - HAProxyStatsTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -717,6 +915,8 @@ Resources:
         - !Ref ConsulTargetGroup
         - !Ref VaultTargetGroup
         - !Ref VaultClusterTargetGroup
+        - !Ref HAProxyHttpTargetGroup
+        - !Ref HAProxyStatsTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
@@ -798,6 +998,32 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8201
+      Protocol: HTTP
+
+  HAProxyHttpClusterListener:
+    DependsOn:
+      - HAProxyHttpTargetGroup
+      - InternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref HAProxyHttpTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref InternalLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  HAProxyStatsClusterListener:
+    DependsOn:
+      - HAProxyStatsTargetGroup
+      - InternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref HAProxyStatsTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref InternalLoadBalancer
+      Port: 1936
       Protocol: HTTP
 
   SwarmManagerLifecycleHook:
