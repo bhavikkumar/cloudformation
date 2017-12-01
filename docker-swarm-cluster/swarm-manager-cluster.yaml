@@ -609,19 +609,19 @@ Resources:
         init_aws_swarm:
           commands:
             docker_run:
-              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker depost/init-aws-swarm:latest"
+              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
               cwd: "~"
         swarm_node_healthcheck:
           commands:
             docker_run:
-              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock depost/swarm-node-healthcheck:latest"
+              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock bhavikk/swarm-node-healthcheck:latest"
               cwd: "~"
         guide_aws_swarm:
           commands:
             docker_run:
-              command: "docker run -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker depost/guide-aws-swarm:latest"
+              command: "docker run -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/guide-aws-swarm:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
                 LIFECYCLE_QUEUE: { "Ref" : "SwarmLifecycleQueue" }
@@ -660,13 +660,13 @@ Resources:
                 ---
                 version: '3.3'
                 networks:
-                  depost:
+                  default_net:
                     external: true
                 services:
                   server:
                     image: consul:latest
                     networks:
-                      depost:
+                      default_net:
                         aliases:
                           - consul.server
                     command: "consul agent -config-file /consul/config/config.json"
@@ -700,10 +700,12 @@ Resources:
             compose_file_permission:
               command: "chmod 644 /opt/consul/compose.yaml"
             create_default_network:
-              command: "docker network create -d overlay --subnet=192.168.0.0/16 depost"
+              command: "docker network create -d overlay --subnet=192.168.0.0/16 default_net"
+              ignoreErrors: true
             docker_run:
               command: "docker stack deploy -c /opt/consul/compose.yaml consul"
               cwd: "~"
+              ignoreErrors: true
         vault:
           files:
             /opt/vault/vault.hcl:
@@ -729,7 +731,7 @@ Resources:
                 VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
               cwd: "~"
             init_vault:
-              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' depost/init-vault:latest"
+              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' bhavikk/init-vault:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
@@ -799,13 +801,13 @@ Resources:
                 ---
                 version: '3.3'
                 networks:
-                  depost:
+                  default_net:
                     external: true
                 services:
                   server:
                     image: sirile/haproxy
                     networks:
-                      depost:
+                      default_net:
                         aliases:
                           - haproxy.server
                     command: "-consul=consul.server:8500"
@@ -842,6 +844,7 @@ Resources:
             docker_run:
               command: "docker stack deploy -c /opt/haproxy/compose.yaml haproxy"
               cwd: "~"
+              ignoreErrors: true
     DependsOn:
       - SwarmManagerSSHSecurityGroup
       - SwarmDynamoDBTable
