@@ -748,7 +748,7 @@ Resources:
                 template {
                   source = "/tmp/haproxy.ctmpl"
                   destination = "/etc/haproxy/haproxy.cfg"
-                  command = "haproxy -f /etc/haproxy/haproxy.cfg -sf $(pidof haproxy) &"
+                  command = "/bin/sh -c 'haproxy -D -f /etc/haproxy/haproxy.cfg -p /run/haproxy-lb.pid -sf $(cat /run/haproxy-lb.pid)'"
                 }
               mode: '000755'
               owner: root
@@ -756,6 +756,8 @@ Resources:
             /opt/haproxy/haproxy.ctmpl:
               content: !Sub |
                 global
+                    log 127.0.0.1   local0
+                    log 127.0.0.1   local1 notice
                     debug
                     stats timeout 30s
                     maxconn 1024
@@ -768,24 +770,27 @@ Resources:
                     timeout connect 5000
                     timeout client  50000
                     timeout server  50000
-                    monitor-uri /healthcheck
 
                 frontend http-in
-                    bind *:80{{range $i,$a:=services}}{{$path:=.Name}}{{range .Tags}}{{if eq . "edge"}}
-                    acl app{{$i}} path_beg -i /{{$path}}{{end}}{{end}}{{end}}
-                    {{range $i,$a:=services}}{{range .Tags}}{{if eq . "edge"}}
-                    use_backend {{$a.Name}} if app{{$i}}{{end}}{{end}}{{end}}
+                    bind 0.0.0.0:80
+                    monitor-uri /healthcheck{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                    # Edge for {{ $service.Name }}, Version: {{ $version }}
+                    acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
+                    use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
+                    {{ end }}{{ end }}{{ end }}{{ end }}
 
-                {{range $i,$a:=services}}{{$path:=.Name}}{{range .Tags}}{{if eq . "edge"}}
-                backend {{$a.Name}}
+                {{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                # Backend for {{ $service.Name }}, Version: {{ $version }}
+                backend {{ $service.Name }}{{ $version }}
                     mode http
                     balance roundrobin
                     option forwardfor
-                    option httpchk get /healthcheck
+                    option httpchk GET /healthcheck
                     http-check expect ! rstatus ^5
                     default-server inter 2s fall 1 rise 2
-                    reqrep ^([^\ ]*\ /){{$path}}[/]?(.*)     \1\2{{range $c,$d:=service $a.Name}}
-                    server {{.Address}} {{.Address}}:{{.Port}} check{{end}}{{end}}{{end}}{{end}}
+                    reqrep ^([^\ ]*\ /)v{{ $version }}/{{ $service.Name }}[/]?(.*)     \1{{ $service.Name }}/\2{{range $c,$d:=service $service.Name}}{{ if $d.Tags | contains "edge" }}{{ if $d.Tags | contains (printf "%s%s" "version=" $version) }}
+                    server {{.Address}} {{.Address}}:{{.Port}} check
+                    {{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}
 
                 listen stats
                     bind 0.0.0.0:1936
@@ -805,12 +810,12 @@ Resources:
                     external: true
                 services:
                   server:
-                    image: sirile/haproxy
+                    image: bhavikk/haproxy-consul-template
                     networks:
                       default_net:
                         aliases:
                           - haproxy.server
-                    command: "-consul=consul.server:8500"
+                    command: "-config=/tmp/haproxy.json -consul-addr=consul.server:8500"
                     ports:
                       - target: 80
                         published: 80
@@ -951,6 +956,19 @@ Resources:
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
         - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
 
+  ExternalLoadBalancer:
+    DependsOn:
+      - HAProxySecurityGroup
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref HAProxySecurityGroup
+      Subnets:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+
   SwarmHealthCheckHttpListener:
     DependsOn:
       - SwarmHealthCheckTargetGroup
@@ -1006,13 +1024,13 @@ Resources:
   HAProxyHttpClusterListener:
     DependsOn:
       - HAProxyHttpTargetGroup
-      - InternalLoadBalancer
+      - ExternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
       - TargetGroupArn: !Ref HAProxyHttpTargetGroup
         Type: forward
-      LoadBalancerArn: !Ref InternalLoadBalancer
+      LoadBalancerArn: !Ref ExternalLoadBalancer
       Port: 80
       Protocol: HTTP
 
@@ -1140,6 +1158,46 @@ Resources:
       - Name: LoadBalancer
         Value: !GetAtt InternalLoadBalancer.LoadBalancerFullName
 
+  ExternalHTTPCodeELB5XXTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Application load balancer returns 5XX HTTP status codes'
+      TreatMissingData: notBreaching
+      Namespace: 'AWS/ApplicationELB'
+      MetricName: HTTPCode_ELB_5XX_Count
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Unit: Count
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+      Dimensions:
+      - Name: LoadBalancer
+        Value: !GetAtt ExternalLoadBalancer.LoadBalancerFullName
+
+  ExternalHTTPCodeTarget5XXTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Application load balancer receives 5XX HTTP status codes from targets'
+      TreatMissingData: notBreaching
+      Namespace: 'AWS/ApplicationELB'
+      MetricName: HTTPCode_Target_5XX_Count
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Unit: Count
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+      Dimensions:
+      - Name: LoadBalancer
+        Value: !GetAtt ExternalLoadBalancer.LoadBalancerFullName
+
 Outputs:
   ManagerSecurityGroupID:
     Description: SecurityGroup ID of the Swarm Manager
@@ -1182,6 +1240,16 @@ Outputs:
     Value: !GetAtt InternalLoadBalancer.DNSName
     Export:
       Name: !Sub '${AWS::StackName}-InternalLoadBalancerDNS'
+  ExternalLoadBalancer:
+    Description: The External Load Balancer
+    Value: !Ref ExternalLoadBalancer
+    Export:
+      Name: !Sub '${AWS::StackName}-ExternalLoadBalancer'
+  ExternalLoadBalancerDNS:
+    Description: The DNS of the external load balancer
+    Value: !GetAtt ExternalLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-ExternalLoadBalancerDNS'
   ConsulTargetGroup:
     Description: The Consul Cluster target group
     Value: !Ref ConsulTargetGroup
