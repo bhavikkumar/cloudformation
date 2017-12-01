@@ -26,6 +26,10 @@ Metadata:
       Parameters:
       - CertificateS3Bucket
       - CertificateFileName
+    - Label:
+        default: 'HA Proxy Parameters'
+      Parameters:
+      - HAProxyPassword
 
 Parameters:
   ParentNetworkStack:
@@ -99,6 +103,10 @@ Parameters:
     Type: String
   CertificateFileName:
     Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
+    Type: String
+  HAProxyPassword:
+    NoEcho: true
+    Description: 'Password for HA Proxy Stats endpoint'
     Type: String
 
 Conditions:
@@ -204,6 +212,37 @@ Resources:
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
+  HAProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group to allow HTTP/HTTPS traffic
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
+  HAProxyStatsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group to allow HTTP/HTTPS traffic
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '1936'
+        ToPort: '1936'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+
   InternalLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -224,6 +263,16 @@ Resources:
       - IpProtocol: tcp
         FromPort: '8201'
         ToPort: '8201'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '1936'
+        ToPort: '1936'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
@@ -464,6 +513,42 @@ Resources:
       VpcId:
         'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
 
+  HAProxyHttpTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /healthcheck
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Join ['-', [ !Ref "AWS::StackName", HAProxyCluster ] ]
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
+  HAProxyStatsTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /healthcheck
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Join ['-', [ !Ref "AWS::StackName", HAProxyStatsCluster ] ]
+      Port: 1936
+      Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
@@ -485,6 +570,7 @@ Resources:
             - consul
             - vault
             - certificates
+            - haproxy
           update_install:
             - install_cfn
             - certificates
@@ -523,19 +609,19 @@ Resources:
         init_aws_swarm:
           commands:
             docker_run:
-              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker depost/init-aws-swarm:latest"
+              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
               cwd: "~"
         swarm_node_healthcheck:
           commands:
             docker_run:
-              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock depost/swarm-node-healthcheck:latest"
+              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock bhavikk/swarm-node-healthcheck:latest"
               cwd: "~"
         guide_aws_swarm:
           commands:
             docker_run:
-              command: "docker run -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker depost/guide-aws-swarm:latest"
+              command: "docker run -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/guide-aws-swarm:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
                 LIFECYCLE_QUEUE: { "Ref" : "SwarmLifecycleQueue" }
@@ -574,12 +660,13 @@ Resources:
                 ---
                 version: '3.3'
                 networks:
-                  consul-network:
+                  default_net:
+                    external: true
                 services:
                   server:
                     image: consul:latest
                     networks:
-                      consul-network:
+                      default_net:
                         aliases:
                           - consul.server
                     command: "consul agent -config-file /consul/config/config.json"
@@ -612,9 +699,13 @@ Resources:
               command: "chmod 644 /opt/consul/config.json"
             compose_file_permission:
               command: "chmod 644 /opt/consul/compose.yaml"
+            create_default_network:
+              command: "docker network create -d overlay --subnet=192.168.0.0/16 default_net"
+              ignoreErrors: true
             docker_run:
               command: "docker stack deploy -c /opt/consul/compose.yaml consul"
               cwd: "~"
+              ignoreErrors: true
         vault:
           files:
             /opt/vault/vault.hcl:
@@ -640,7 +731,7 @@ Resources:
                 VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
               cwd: "~"
             init_vault:
-              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' depost/init-vault:latest"
+              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' bhavikk/init-vault:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
@@ -650,6 +741,115 @@ Resources:
           commands:
             config_file_permission:
               command: "chmod 400 /opt/certificates/*"
+        haproxy:
+          files:
+            /opt/haproxy/haproxy.json:
+              content:
+                template {
+                  source = "/tmp/haproxy.ctmpl"
+                  destination = "/etc/haproxy/haproxy.cfg"
+                  command = "/bin/sh -c 'haproxy -D -f /etc/haproxy/haproxy.cfg -p /run/haproxy-lb.pid -sf $(cat /run/haproxy-lb.pid)'"
+                }
+              mode: '000755'
+              owner: root
+              group: root
+            /opt/haproxy/haproxy.ctmpl:
+              content: !Sub |
+                global
+                    log 127.0.0.1   local0
+                    log 127.0.0.1   local1 notice
+                    debug
+                    stats timeout 30s
+                    maxconn 1024
+
+                defaults
+                    log global
+                    option httplog
+                    option dontlognull
+                    mode http
+                    timeout connect 5000
+                    timeout client  50000
+                    timeout server  50000
+
+                frontend http-in
+                    bind 0.0.0.0:80
+                    monitor-uri /healthcheck{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                    # Edge for {{ $service.Name }}, Version: {{ $version }}
+                    acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
+                    use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
+                    {{ end }}{{ end }}{{ end }}{{ end }}
+
+                {{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                # Backend for {{ $service.Name }}, Version: {{ $version }}
+                backend {{ $service.Name }}{{ $version }}
+                    mode http
+                    balance roundrobin
+                    option forwardfor
+                    option httpchk GET /healthcheck
+                    http-check expect ! rstatus ^5
+                    default-server inter 2s fall 1 rise 2
+                    reqrep ^([^\ ]*\ /)v{{ $version }}/{{ $service.Name }}[/]?(.*)     \1{{ $service.Name }}/\2{{range $c,$d:=service $service.Name}}{{ if $d.Tags | contains "edge" }}{{ if $d.Tags | contains (printf "%s%s" "version=" $version) }}
+                    server {{.Address}} {{.Address}}:{{.Port}} check
+                    {{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}
+
+                listen stats
+                    bind 0.0.0.0:1936
+                    stats enable
+                    stats uri /
+                    stats hide-version
+                    stats auth admin:${HAProxyPassword}
+              mode: '000755'
+              owner: root
+              group: root
+            /opt/haproxy/compose.yaml:
+              content: !Sub |
+                ---
+                version: '3.3'
+                networks:
+                  default_net:
+                    external: true
+                services:
+                  server:
+                    image: bhavikk/haproxy-consul-template
+                    networks:
+                      default_net:
+                        aliases:
+                          - haproxy.server
+                    command: "-config=/tmp/haproxy.json -consul-addr=consul.server:8500"
+                    ports:
+                      - target: 80
+                        published: 80
+                        mode: host
+                      - target: 1936
+                        published: 1936
+                        mode: host
+                    volumes:
+                      - /opt/haproxy:/tmp
+                    deploy:
+                      mode: global
+                      endpoint_mode: dnsrr
+                      update_config:
+                        parallelism: 1
+                        failure_action: rollback
+                        delay: 30s
+                      restart_policy:
+                        condition: any
+                        delay: 5s
+                        window: 120s
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            config_file_permission:
+              command: "chmod 644 /opt/haproxy/haproxy.json"
+            consul_template_file_permission:
+              command: "chmod 644 /opt/haproxy/haproxy.ctmpl"
+            compose_file_permission:
+              command: "chmod 644 /opt/haproxy/compose.yaml"
+            docker_run:
+              command: "docker stack deploy -c /opt/haproxy/compose.yaml haproxy"
+              cwd: "~"
+              ignoreErrors: true
     DependsOn:
       - SwarmManagerSSHSecurityGroup
       - SwarmDynamoDBTable
@@ -658,6 +858,8 @@ Resources:
       - SwarmClusterSecurityGroup
       - ConsulClusterSecurityGroup
       - VaultClusterSecurityGroup
+      - HAProxySecurityGroup
+      - HAProxyStatsSecurityGroup
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -675,6 +877,8 @@ Resources:
         - !Ref SwarmClusterSecurityGroup
         - !Ref ConsulClusterSecurityGroup
         - !Ref VaultClusterSecurityGroup
+        - !Ref HAProxySecurityGroup
+        - !Ref HAProxyStatsSecurityGroup
       UserData:
         "Fn::Base64":
           !Sub |
@@ -692,6 +896,8 @@ Resources:
       - ConsulTargetGroup
       - VaultTargetGroup
       - VaultClusterTargetGroup
+      - HAProxyHttpTargetGroup
+      - HAProxyStatsTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -717,6 +923,8 @@ Resources:
         - !Ref ConsulTargetGroup
         - !Ref VaultTargetGroup
         - !Ref VaultClusterTargetGroup
+        - !Ref HAProxyHttpTargetGroup
+        - !Ref HAProxyStatsTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
@@ -743,6 +951,19 @@ Resources:
       Scheme: internal
       SecurityGroups:
         - !Ref InternalLoadBalancerSecurityGroup
+      Subnets:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+
+  ExternalLoadBalancer:
+    DependsOn:
+      - HAProxySecurityGroup
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref HAProxySecurityGroup
       Subnets:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
@@ -798,6 +1019,32 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8201
+      Protocol: HTTP
+
+  HAProxyHttpClusterListener:
+    DependsOn:
+      - HAProxyHttpTargetGroup
+      - ExternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref HAProxyHttpTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  HAProxyStatsClusterListener:
+    DependsOn:
+      - HAProxyStatsTargetGroup
+      - InternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref HAProxyStatsTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref InternalLoadBalancer
+      Port: 1936
       Protocol: HTTP
 
   SwarmManagerLifecycleHook:
@@ -911,6 +1158,46 @@ Resources:
       - Name: LoadBalancer
         Value: !GetAtt InternalLoadBalancer.LoadBalancerFullName
 
+  ExternalHTTPCodeELB5XXTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Application load balancer returns 5XX HTTP status codes'
+      TreatMissingData: notBreaching
+      Namespace: 'AWS/ApplicationELB'
+      MetricName: HTTPCode_ELB_5XX_Count
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Unit: Count
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+      Dimensions:
+      - Name: LoadBalancer
+        Value: !GetAtt ExternalLoadBalancer.LoadBalancerFullName
+
+  ExternalHTTPCodeTarget5XXTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Application load balancer receives 5XX HTTP status codes from targets'
+      TreatMissingData: notBreaching
+      Namespace: 'AWS/ApplicationELB'
+      MetricName: HTTPCode_Target_5XX_Count
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Unit: Count
+      AlarmActions:
+      - 'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'
+      Dimensions:
+      - Name: LoadBalancer
+        Value: !GetAtt ExternalLoadBalancer.LoadBalancerFullName
+
 Outputs:
   ManagerSecurityGroupID:
     Description: SecurityGroup ID of the Swarm Manager
@@ -953,6 +1240,16 @@ Outputs:
     Value: !GetAtt InternalLoadBalancer.DNSName
     Export:
       Name: !Sub '${AWS::StackName}-InternalLoadBalancerDNS'
+  ExternalLoadBalancer:
+    Description: The External Load Balancer
+    Value: !Ref ExternalLoadBalancer
+    Export:
+      Name: !Sub '${AWS::StackName}-ExternalLoadBalancer'
+  ExternalLoadBalancerDNS:
+    Description: The DNS of the external load balancer
+    Value: !GetAtt ExternalLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-ExternalLoadBalancerDNS'
   ConsulTargetGroup:
     Description: The Consul Cluster target group
     Value: !Ref ConsulTargetGroup
