@@ -567,9 +567,9 @@ Resources:
             - init_aws_swarm
             - swarm_node_healthcheck
             - guide_aws_swarm
+            - certificates
             - consul
             - vault
-            - certificates
             - haproxy
           update_install:
             - install_cfn
@@ -677,8 +677,7 @@ Resources:
                     volumes:
                       - /opt/consul:/consul/config
                     deploy:
-                      mode: replicated
-                      replicas: ${ManagerClusterSize}
+                      mode: global
                       endpoint_mode: dnsrr
                       update_config:
                         parallelism: 1
@@ -691,6 +690,33 @@ Resources:
                       placement:
                         constraints:
                           - node.role == manager
+                  agent:
+                    image: consul:latest
+                    networks:
+                      default_net:
+                        aliases:
+                          - consul.server
+                    command: "consul agent -config-file /consul/config/config.json"
+                    ports:
+                      - target: 8500
+                        published: 8500
+                        mode: host
+                    volumes:
+                      - /opt/consul:/consul/config
+                    deploy:
+                      mode: global
+                      endpoint_mode: dnsrr
+                      update_config:
+                        parallelism: 1
+                        failure_action: rollback
+                        delay: 30s
+                      restart_policy:
+                        condition: any
+                        delay: 5s
+                        window: 120s
+                      placement:
+                        constraints:
+                          - node.role == worker
               mode: '000755'
               owner: root
               group: root
@@ -702,7 +728,7 @@ Resources:
             create_default_network:
               command: "docker network create -d overlay --subnet=192.168.0.0/16 default_net"
               ignoreErrors: true
-            docker_run:
+            deploy_consul_stack:
               command: "docker stack deploy -c /opt/consul/compose.yaml consul"
               cwd: "~"
               ignoreErrors: true
@@ -871,7 +897,7 @@ Resources:
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'ManagerInstanceType', Arch]]
       InstanceType: !Ref ManagerInstanceType
       IamInstanceProfile: !Ref SwarmManagerInstanceProfile
-      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
+      KeyName: !Ref KeyName
       SecurityGroups:
         - !Ref SwarmManagerSSHSecurityGroup
         - !Ref SwarmClusterSecurityGroup
@@ -1215,6 +1241,16 @@ Outputs:
     Value: !Ref ConsulClusterSecurityGroup
     Export:
       Name: !Sub '${AWS::StackName}-ConsulClusterSecurityGroup'
+  HAProxySecurityGroupOutput:
+    Description: The security group which allows HAProxy to function
+    Value: !Ref HAProxySecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-HAProxySecurityGroup'
+  HAProxyStatsSecurityGroupOutput:
+    Description: The security group which allows HAProxy stats to function
+    Value: !Ref HAProxyStatsSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-HAProxyStatsSecurityGroup'
   SwarmTableName:
     Description: The DynamoDB table name for the swarm cluster
     Value: !Ref SwarmDynamoDBTable
@@ -1260,6 +1296,16 @@ Outputs:
     Value: !Ref SwarmHealthCheckTargetGroup
     Export:
       Name: !Sub '${AWS::StackName}-SwarmHealthCheckTargetGroup'
+  HAProxyHttpTargetGroup:
+    Description: The HA Proxy target group
+    Value: !Ref HAProxyHttpTargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-HAProxyHttpTargetGroup'
+  HAProxyStatsTargetGroup:
+    Description: The HA Proxy stats target group
+    Value: !Ref HAProxyStatsTargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-HAProxyStatsTargetGroup'
 
 Mappings:
   AWSInstanceType2Arch:
