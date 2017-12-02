@@ -677,8 +677,7 @@ Resources:
                     volumes:
                       - /opt/consul:/consul/config
                     deploy:
-                      mode: replicated
-                      replicas: ${ManagerClusterSize}
+                      mode: global
                       endpoint_mode: dnsrr
                       update_config:
                         parallelism: 1
@@ -702,8 +701,6 @@ Resources:
                       - target: 8500
                         published: 8500
                         mode: host
-                    depends_on:
-                      - "server"
                     volumes:
                       - /opt/consul:/consul/config
                     deploy:
@@ -717,6 +714,9 @@ Resources:
                         condition: any
                         delay: 5s
                         window: 120s
+                      placement:
+                        constraints:
+                          - node.role == worker
               mode: '000755'
               owner: root
               group: root
