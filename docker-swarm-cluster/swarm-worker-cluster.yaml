@@ -13,7 +13,6 @@ Metadata:
     - Label:
         default: 'Docker Swarm Worker Parameters'
       Parameters:
-      - KeyName
       - WorkerInstanceType
       - WorkerClusterSize
       - WorkerDiskSize
@@ -42,9 +41,6 @@ Parameters:
   SwarmManagerStack:
     Description: 'The swarm manager stack which we will be joining the workers too.'
     Type: String
-  KeyName:
-    Description: Amazon EC2 Key Pair
-    Type: "AWS::EC2::KeyPair::KeyName"
   DesiredWorkerClusterSize:
     Description: The desired number of swarm worker nodes
     Default: 3
@@ -404,7 +400,6 @@ Resources:
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'WorkerInstanceType', Arch]]
       InstanceType: !Ref WorkerInstanceType
       IamInstanceProfile: !Ref SwarmWorkerInstanceProfile
-      KeyName: !Ref KeyName
       SecurityGroups:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmClusterSecurityGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
