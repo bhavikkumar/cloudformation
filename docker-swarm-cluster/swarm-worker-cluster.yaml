@@ -1,0 +1,757 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Docker Swarm Worker Cluster based on Docker for AWS'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentNetworkStack
+      - ParentAlertStack
+      - SwarmManagerStack
+    - Label:
+        default: 'Docker Swarm Worker Parameters'
+      Parameters:
+      - KeyName
+      - WorkerInstanceType
+      - WorkerClusterSize
+      - WorkerDiskSize
+      - WorkerDiskType
+    - Label:
+        default: 'Consul Parameters'
+      Parameters:
+      - EncryptionToken
+    - Label:
+        default: 'TLS Certificate Parameters'
+      Parameters:
+      - CertificateS3Bucket
+      - CertificateFileName
+    - Label:
+        default: 'HA Proxy Parameters'
+      Parameters:
+      - HAProxyPassword
+
+Parameters:
+  ParentNetworkStack:
+    Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
+    Type: String
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
+    Type: String
+  SwarmManagerStack:
+    Description: 'The swarm manager stack which we will be joining the workers too.'
+    Type: String
+  KeyName:
+    Description: Amazon EC2 Key Pair
+    Type: "AWS::EC2::KeyPair::KeyName"
+  DesiredWorkerClusterSize:
+    Description: The desired number of swarm worker nodes
+    Default: 3
+    Type: Number
+    MaxValue: 20
+  MaxWorkerClusterSize:
+    Description: The maximum number of swarm worker nodes
+    Default: 3
+    Type: Number
+    MaxValue: 20
+  WorkerInstanceType:
+    Description: Swarm worker EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m4.10xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - r4.large
+      - r4.xlarge
+      - r4.2xlarge
+      - r4.4xlarge
+      - r4.8xlarge
+      - r4.16xlarge
+      - i3.large
+      - i3.xlarge
+      - i3.2xlarge
+      - i3.4xlarge
+      - i3.8xlarge
+      - i3.16xlarge
+  WorkerDiskSize:
+    Description: Size of Manager's ephemeral storage volume in GiB
+    Type: Number
+    MinValue: 8
+    Default: 20
+    MaxValue: 1024
+  WorkerDiskType:
+    Description: Manager ephemeral storage volume type
+    Type: String
+    Default: gp2
+    AllowedValues:
+      - standard
+      - gp2
+  EncryptionToken:
+    NoEcho: true
+    Description: 'Secret key to use for encryption of Consul network traffic. This key must be 16-bytes that are Base64-encoded'
+    Type: String
+  CertificateS3Bucket:
+    Description: 'Secure S3 Bucket which contains the required certificates'
+    Type: String
+  CertificateFileName:
+    Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
+    Type: String
+  HAProxyPassword:
+    NoEcho: true
+    Description: 'Password for HA Proxy Stats endpoint'
+    Type: String
+
+Conditions:
+  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
+
+Resources:
+  SwarmWorkerAsgNotification:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: 'Worker ASG Notifications'
+      TopicName: 'SwarmWorkerNotifications'
+
+  SwarmWorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+                - "autoscaling.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+
+  WorkerDynamoDBPolicy:
+    DependsOn:
+      - SwarmWorkerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-worker-dynamodb-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "dynamodb:GetItem"
+            Resource:
+              Fn::ImportValue:
+                !Sub "${SwarmManagerStack}-SwarmTableArn"
+      Roles:
+        - !Ref SwarmWorkerRole
+
+  WorkerEC2Policy:
+    DependsOn:
+      - SwarmWorkerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-worker-ec2-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "ec2:CreateTags"
+              - "ec2:DescribeTags"
+              - "ec2:DescribeInstances"
+            Resource: "*"
+      Roles:
+        - !Ref SwarmWorkerRole
+
+  CertificateBucketPolicy:
+    DependsOn:
+      - SwarmWorkerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "swarm-worker-certificate-download-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub 'arn:aws:s3:::${CertificateS3Bucket}/*'
+      Roles:
+        - !Ref SwarmWorkerRole
+
+  SwarmLifecycleQueuePolicy:
+    DependsOn:
+      - SwarmWorkerRole
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: "swarm-sqs-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "sqs:SendMessage"
+              - "sqs:GetQueueUrl"
+              - "sns:Publish"
+            Resource:
+              Fn::ImportValue:
+                !Sub "${SwarmManagerStack}-SwarmLifecycleQueue"
+      Roles:
+        - !Ref SwarmWorkerRole
+
+  SwarmWorkerInstanceProfile:
+    DependsOn:
+      - SwarmWorkerRole
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref SwarmWorkerRole
+
+  SwarmWorkerLaunchConfiguration:
+    Metadata:
+      Comment: Update, Install Docker and initialise the swarm
+      AWS::CloudFormation::Authentication:
+        rolebased:
+          type: "S3"
+          buckets:
+            - !Ref CertificateS3Bucket
+          roleName:
+            Ref: SwarmWorkerRole
+      AWS::CloudFormation::Init:
+        configSets:
+          full_install:
+            - install_cfn
+            - install_docker
+            - certificates
+            - consul_config
+            - haproxy_config
+            - init_aws_swarm
+            - swarm_node_healthcheck
+          update_install:
+            - install_cfn
+            - certificates
+        install_cfn:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.SwarmWorkerLaunchConfiguration.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmWorkerLaunchConfiguration -c update_install --region ${AWS::Region}
+                runas=root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files: [/etc/cfn/cfn-hup.conf, /etc/cfn/hooks.d/cfn-auto-reloader.conf]
+        install_docker:
+          packages:
+            yum:
+              docker: []
+          services:
+            sysvinit:
+              docker:
+                enabled: 'true'
+                ensureRunning: 'true'
+        certificates:
+          sources:
+            /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
+          commands:
+            config_file_permission:
+              command: "chmod 400 /opt/certificates/*"
+        consul_config:
+          files:
+            /opt/consul/config.json:
+              content: !Sub |
+                {
+                  "advertise_addr" : "{{ GetInterfaceIP \"eth0\" }}",
+                  "bind_addr": "{{ GetInterfaceIP \"eth0\" }}",
+                  "client_addr": "0.0.0.0",
+                  "data_dir": "/consul/data",
+                  "datacenter": "${AWS::Region}",
+                  "leave_on_terminate" : true,
+                  "retry_join" : [
+                    "consul.server"
+                  ],
+                  "server_name" : "agent.${AWS::Region}.consul",
+                  "skip_leave_on_interrupt" : false,
+                  "server" : false,
+                  "ui" : false,
+                  "disable_update_check": true,
+                  "log_level": "warn",
+                  "encrypt": "${EncryptionToken}"
+                }
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            config_file_permission:
+              command: "chmod 644 /opt/consul/config.json"
+        haproxy_config:
+          files:
+            /opt/haproxy/haproxy.json:
+              content:
+                template {
+                  source = "/tmp/haproxy.ctmpl"
+                  destination = "/etc/haproxy/haproxy.cfg"
+                  command = "/bin/sh -c 'haproxy -D -f /etc/haproxy/haproxy.cfg -p /run/haproxy-lb.pid -sf $(cat /run/haproxy-lb.pid)'"
+                }
+              mode: '000755'
+              owner: root
+              group: root
+            /opt/haproxy/haproxy.ctmpl:
+              content: !Sub |
+                global
+                    log 127.0.0.1   local0
+                    log 127.0.0.1   local1 notice
+                    debug
+                    stats timeout 30s
+                    maxconn 1024
+
+                defaults
+                    log global
+                    option httplog
+                    option dontlognull
+                    mode http
+                    timeout connect 5000
+                    timeout client  50000
+                    timeout server  50000
+
+                frontend http-in
+                    bind 0.0.0.0:80
+                    monitor-uri /healthcheck{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                    # Edge for {{ $service.Name }}, Version: {{ $version }}
+                    acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
+                    use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
+                    {{ end }}{{ end }}{{ end }}{{ end }}
+
+                {{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                # Backend for {{ $service.Name }}, Version: {{ $version }}
+                backend {{ $service.Name }}{{ $version }}
+                    mode http
+                    balance roundrobin
+                    option forwardfor
+                    option httpchk GET /healthcheck
+                    http-check expect ! rstatus ^5
+                    default-server inter 2s fall 1 rise 2
+                    reqrep ^([^\ ]*\ /)v{{ $version }}/{{ $service.Name }}[/]?(.*)     \1{{ $service.Name }}/\2{{range $c,$d:=service $service.Name}}{{ if $d.Tags | contains "edge" }}{{ if $d.Tags | contains (printf "%s%s" "version=" $version) }}
+                    server {{.Address}} {{.Address}}:{{.Port}} check
+                    {{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}
+
+                listen stats
+                    bind 0.0.0.0:1936
+                    stats enable
+                    stats uri /
+                    stats hide-version
+                    stats auth admin:${HAProxyPassword}
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            config_file_permission:
+              command: "chmod 644 /opt/haproxy/haproxy.json"
+            consul_template_file_permission:
+              command: "chmod 644 /opt/haproxy/haproxy.ctmpl"
+        init_aws_swarm:
+          commands:
+            docker_run:
+              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
+              env:
+                DYNAMODB_TABLE: { "Fn::ImportValue" : { "Fn::Sub" : "${SwarmManagerStack}-SwarmTableName" } }
+              cwd: "~"
+        swarm_node_healthcheck:
+          commands:
+            docker_run:
+              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock bhavikk/swarm-node-healthcheck:latest"
+              cwd: "~"
+    DependsOn:
+      - SwarmWorkerInstanceProfile
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true
+      BlockDeviceMappings:
+        - DeviceName: "/dev/xvda"
+          Ebs:
+            VolumeSize: !Ref WorkerDiskSize
+            VolumeType: !Ref WorkerDiskType
+      ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'WorkerInstanceType', Arch]]
+      InstanceType: !Ref WorkerInstanceType
+      IamInstanceProfile: !Ref SwarmWorkerInstanceProfile
+      KeyName: !Ref KeyName
+      SecurityGroups:
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmClusterSecurityGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxySecurityGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsSecurityGroup'
+      UserData:
+        "Fn::Base64":
+          !Sub |
+            #!/bin/bash -xe
+            yum update -y
+            yum install -y aws-cfn-bootstrap
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SwarmWorkerLaunchConfiguration --configsets full_install --region ${AWS::Region}
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource SwarmWorkerAutoScaleGroup --region ${AWS::Region}
+
+  SwarmWorkerAutoScaleGroup:
+    DependsOn:
+      - SwarmWorkerAsgNotification
+      - SwarmWorkerLaunchConfiguration
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+        Count: !Ref DesiredWorkerClusterSize
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: !Ref DesiredWorkerClusterSize
+        PauseTime: PT10M
+        WaitOnResourceSignals: true
+    Properties:
+      MinSize: !Ref DesiredWorkerClusterSize
+      MaxSize: !Ref MaxWorkerClusterSize
+      DesiredCapacity: !Ref DesiredWorkerClusterSize
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      LaunchConfigurationName: !Ref SwarmWorkerLaunchConfiguration
+      MetricsCollection:
+        - Granularity: 1Minute
+      TargetGroupARNs:
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmHealthCheckTargetGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulTargetGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpTargetGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsTargetGroup'
+      VPCZoneIdentifier:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+      NotificationConfigurations:
+      - TopicARN:
+          !Ref SwarmWorkerAsgNotification
+        NotificationTypes:
+          - autoscaling:EC2_INSTANCE_LAUNCH
+          - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+          - autoscaling:EC2_INSTANCE_TERMINATE
+          - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+      Tags:
+        -
+          Key: swarm-node-type
+          PropagateAtLaunch: true
+          Value: worker
+
+  SwarmWorkerLifecycleHook:
+    DependsOn:
+      - SwarmWorkerAutoScaleGroup
+      - SwarmWorkerRole
+    Type: AWS::AutoScaling::LifecycleHook
+    Properties:
+      AutoScalingGroupName: !Ref SwarmWorkerAutoScaleGroup
+      DefaultResult: CONTINUE
+      LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+      NotificationTargetARN:
+        Fn::ImportValue:
+          !Sub "${SwarmManagerStack}-SwarmLifecycleQueue"
+      RoleARN: !GetAtt SwarmWorkerRole.Arn
+
+Mappings:
+  AWSInstanceType2Arch:
+    t1.micro:
+      Arch: PV64
+    t2.nano:
+      Arch: HVM64
+    t2.micro:
+      Arch: HVM64
+    t2.small:
+      Arch: HVM64
+    t2.medium:
+      Arch: HVM64
+    t2.large:
+      Arch: HVM64
+    m1.small:
+      Arch: PV64
+    m1.medium:
+      Arch: PV64
+    m1.large:
+      Arch: PV64
+    m1.xlarge:
+      Arch: PV64
+    m2.xlarge:
+      Arch: PV64
+    m2.2xlarge:
+      Arch: PV64
+    m2.4xlarge:
+      Arch: PV64
+    m3.medium:
+      Arch: HVM64
+    m3.large:
+      Arch: HVM64
+    m3.xlarge:
+      Arch: HVM64
+    m3.2xlarge:
+      Arch: HVM64
+    m4.large:
+      Arch: HVM64
+    m4.xlarge:
+      Arch: HVM64
+    m4.2xlarge:
+      Arch: HVM64
+    m4.4xlarge:
+      Arch: HVM64
+    m4.10xlarge:
+      Arch: HVM64
+    c1.medium:
+      Arch: PV64
+    c1.xlarge:
+      Arch: PV64
+    c3.large:
+      Arch: HVM64
+    c3.xlarge:
+      Arch: HVM64
+    c3.2xlarge:
+      Arch: HVM64
+    c3.4xlarge:
+      Arch: HVM64
+    c3.8xlarge:
+      Arch: HVM64
+    c4.large:
+      Arch: HVM64
+    c4.xlarge:
+      Arch: HVM64
+    c4.2xlarge:
+      Arch: HVM64
+    c4.4xlarge:
+      Arch: HVM64
+    c4.8xlarge:
+      Arch: HVM64
+    g2.2xlarge:
+      Arch: HVMG2
+    g2.8xlarge:
+      Arch: HVMG2
+    r3.large:
+      Arch: HVM64
+    r3.xlarge:
+      Arch: HVM64
+    r3.2xlarge:
+      Arch: HVM64
+    r3.4xlarge:
+      Arch: HVM64
+    r3.8xlarge:
+      Arch: HVM64
+    i2.xlarge:
+      Arch: HVM64
+    i2.2xlarge:
+      Arch: HVM64
+    i2.4xlarge:
+      Arch: HVM64
+    i2.8xlarge:
+      Arch: HVM64
+    d2.xlarge:
+      Arch: HVM64
+    d2.2xlarge:
+      Arch: HVM64
+    d2.4xlarge:
+      Arch: HVM64
+    d2.8xlarge:
+      Arch: HVM64
+    hi1.4xlarge:
+      Arch: HVM64
+    hs1.8xlarge:
+      Arch: HVM64
+    cr1.8xlarge:
+      Arch: HVM64
+    cc2.8xlarge:
+      Arch: HVM64
+  AWSInstanceType2NATArch:
+    t1.micro:
+      Arch: NATPV64
+    t2.nano:
+      Arch: NATHVM64
+    t2.micro:
+      Arch: NATHVM64
+    t2.small:
+      Arch: NATHVM64
+    t2.medium:
+      Arch: NATHVM64
+    t2.large:
+      Arch: NATHVM64
+    m1.small:
+      Arch: NATPV64
+    m1.medium:
+      Arch: NATPV64
+    m1.large:
+      Arch: NATPV64
+    m1.xlarge:
+      Arch: NATPV64
+    m2.xlarge:
+      Arch: NATPV64
+    m2.2xlarge:
+      Arch: NATPV64
+    m2.4xlarge:
+      Arch: NATPV64
+    m3.medium:
+      Arch: NATHVM64
+    m3.large:
+      Arch: NATHVM64
+    m3.xlarge:
+      Arch: NATHVM64
+    m3.2xlarge:
+      Arch: NATHVM64
+    m4.large:
+      Arch: NATHVM64
+    m4.xlarge:
+      Arch: NATHVM64
+    m4.2xlarge:
+      Arch: NATHVM64
+    m4.4xlarge:
+      Arch: NATHVM64
+    m4.10xlarge:
+      Arch: NATHVM64
+    c1.medium:
+      Arch: NATPV64
+    c1.xlarge:
+      Arch: NATPV64
+    c3.large:
+      Arch: NATHVM64
+    c3.xlarge:
+      Arch: NATHVM64
+    c3.2xlarge:
+      Arch: NATHVM64
+    c3.4xlarge:
+      Arch: NATHVM64
+    c3.8xlarge:
+      Arch: NATHVM64
+    c4.large:
+      Arch: NATHVM64
+    c4.xlarge:
+      Arch: NATHVM64
+    c4.2xlarge:
+      Arch: NATHVM64
+    c4.4xlarge:
+      Arch: NATHVM64
+    c4.8xlarge:
+      Arch: NATHVM64
+    g2.2xlarge:
+      Arch: NATHVMG2
+    g2.8xlarge:
+      Arch: NATHVMG2
+    r3.large:
+      Arch: NATHVM64
+    r3.xlarge:
+      Arch: NATHVM64
+    r3.2xlarge:
+      Arch: NATHVM64
+    r3.4xlarge:
+      Arch: NATHVM64
+    r3.8xlarge:
+      Arch: NATHVM64
+    i2.xlarge:
+      Arch: NATHVM64
+    i2.2xlarge:
+      Arch: NATHVM64
+    i2.4xlarge:
+      Arch: NATHVM64
+    i2.8xlarge:
+      Arch: NATHVM64
+    d2.xlarge:
+      Arch: NATHVM64
+    d2.2xlarge:
+      Arch: NATHVM64
+    d2.4xlarge:
+      Arch: NATHVM64
+    d2.8xlarge:
+      Arch: NATHVM64
+    hi1.4xlarge:
+      Arch: NATHVM64
+    hs1.8xlarge:
+      Arch: NATHVM64
+    cr1.8xlarge:
+      Arch: NATHVM64
+    cc2.8xlarge:
+      Arch: NATHVM64
+  # This list comes from https://aws.amazon.com/amazon-linux-ami/
+  AWSRegionArch2AMI:
+    us-east-1:
+      PV64: ami-abc1ebbd
+      HVM64: ami-a4c7edb2
+      HVMG2: ami-a41a3fb3
+    us-east-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-8a7859ef
+      HVMG2: NOT_SUPPORTED
+    us-west-2:
+      PV64: ami-98f3e7e1
+      HVM64: ami-6df1e514
+      HVMG2: ami-caf253aa
+    us-west-1:
+      PV64: ami-347e5254
+      HVM64: ami-327f5352
+      HVMG2: ami-00347e60
+    ca-central-1:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-a7aa15c3
+      HVMG2: NOT_SUPPORTED
+    eu-west-1:
+      PV64: ami-c4bba0a2
+      HVM64: ami-d7b9a2b1
+      HVMG2: ami-e2f7bd91
+    eu-west-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-ed100689
+      HVMG2: NOT_SUPPORTED
+    eu-central-1:
+      PV64: ami-4dbc1a22
+      HVM64: ami-82be18ed
+      HVMG2: ami-d2ff04bd
+    ap-southeast-1:
+      PV64: ami-42901f21
+      HVM64: ami-77af2014
+      HVMG2: ami-f3f95990
+    ap-northeast-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-e21cc38c
+      HVMG2: NOT_SUPPORTED
+    ap-northeast-1:
+      PV64: ami-d3d3c4b4
+      HVM64: ami-3bd3c45c
+      HVMG2: ami-4c78d52d
+    ap-southeast-2:
+      PV64: ami-43918120
+      HVM64: ami-10918173
+      HVMG2: ami-3a122e59
+    ap-south-1:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-47205e28
+      HVMG2: NOT_SUPPORTED
+    sa-east-1:
+      PV64: ami-1cdab170
+      HVM64: ami-87dab1eb
+      HVMG2: NOT_SUPPORTED
