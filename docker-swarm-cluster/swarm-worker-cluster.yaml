@@ -7,7 +7,7 @@ Metadata:
     - Label:
         default: 'Parent Stacks'
       Parameters:
-      - ParentNetworkStack
+      - ParentVPCStack
       - ParentAlertStack
       - SwarmManagerStack
     - Label:
@@ -33,7 +33,7 @@ Metadata:
       - HAProxyPassword
 
 Parameters:
-  ParentNetworkStack:
+  ParentVPCStack:
     Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
     Type: String
   ParentAlertStack:
@@ -447,9 +447,9 @@ Resources:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsTargetGroup'
       VPCZoneIdentifier:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
       NotificationConfigurations:
       - TopicARN:
           !Ref SwarmWorkerAsgNotification
