@@ -8,6 +8,8 @@ Metadata:
         default: 'Parent Stacks'
       Parameters:
       - ParentVPCStack
+      - ParentPublicZoneStack
+      - ParentPrivateZoneStack
       - ParentAlertStack
     - Label:
         default: 'Docker Swarm Manager Parameters'
@@ -34,6 +36,12 @@ Metadata:
 Parameters:
   ParentVPCStack:
     Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
+    Type: String
+  ParentPublicZoneStack:
+    Description: 'Stack name of parent Hosted Zone stack based on dns/*-hosted-zone.yaml template.'
+    Type: String
+  ParentPrivateZoneStack:
+    Description: 'Stack name of parent Hosted Zone stack based on dns/*-hosted-zone.yaml template.'
     Type: String
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
@@ -265,6 +273,18 @@ Resources:
         ToPort: '1936'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
+
+  ExternalLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow public traffic to the external load balancer
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -979,7 +999,7 @@ Resources:
     Properties:
       Scheme: internet-facing
       SecurityGroups:
-        - !Ref HAProxySecurityGroup
+        - !Ref ExternalLoadBalancerSecurityGroup
       Subnets:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
@@ -1062,6 +1082,32 @@ Resources:
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 1936
       Protocol: HTTP
+
+  VaultPrivateDNS:
+    DependsOn:
+      - InternalLoadBalancer
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt InternalLoadBalancer.DNSName
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-HostedZoneId'
+
+  APIDNS:
+    DependsOn:
+      - ExternalLoadBalancer
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      Name: !Join [ '.', [ 'api', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt ExternalLoadBalancer.DNSName
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
 
   SwarmManagerLifecycleHook:
     DependsOn:
