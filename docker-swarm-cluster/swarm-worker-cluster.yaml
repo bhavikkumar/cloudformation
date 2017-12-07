@@ -14,7 +14,8 @@ Metadata:
         default: 'Docker Swarm Worker Parameters'
       Parameters:
       - WorkerInstanceType
-      - WorkerClusterSize
+      - DesiredWorkerClusterSize
+      - MaxWorkerClusterSize
       - WorkerDiskSize
       - WorkerDiskType
     - Label:
