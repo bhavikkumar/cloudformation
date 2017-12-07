@@ -179,18 +179,8 @@ Resources:
         'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
       SecurityGroupIngress:
       - IpProtocol: tcp
-        FromPort: '8300'
-        ToPort: '8302'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
-      - IpProtocol: tcp
         FromPort: '8500'
         ToPort: '8500'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
-      - IpProtocol: tcp
-        FromPort: '8600'
-        ToPort: '8600'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
 
@@ -517,7 +507,7 @@ Resources:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
       HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /healthcheck
+      HealthCheckPath: /health
       HealthCheckPort: 80
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 8
@@ -535,7 +525,7 @@ Resources:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
       HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /healthcheck
+      HealthCheckPath: /health
       HealthCheckPort: 80
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 8
@@ -799,7 +789,7 @@ Resources:
 
                 frontend http-in
                     bind 0.0.0.0:80
-                    monitor-uri /healthcheck{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                    monitor-uri /health{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
                     # Edge for {{ $service.Name }}, Version: {{ $version }}
                     acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
                     use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
@@ -811,7 +801,7 @@ Resources:
                     mode http
                     balance roundrobin
                     option forwardfor
-                    option httpchk GET /healthcheck
+                    option httpchk GET /health
                     http-check expect ! rstatus ^5
                     default-server inter 2s fall 1 rise 2
                     reqrep ^([^\ ]*\ /)v{{ $version }}/{{ $service.Name }}[/]?(.*)     \1{{ $service.Name }}/\2{{range $c,$d:=service $service.Name}}{{ if $d.Tags | contains "edge" }}{{ if $d.Tags | contains (printf "%s%s" "version=" $version) }}
