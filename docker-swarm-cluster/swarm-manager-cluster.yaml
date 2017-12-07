@@ -7,7 +7,9 @@ Metadata:
     - Label:
         default: 'Parent Stacks'
       Parameters:
-      - ParentNetworkStack
+      - ParentVPCStack
+      - ParentPublicZoneStack
+      - ParentPrivateZoneStack
       - ParentAlertStack
     - Label:
         default: 'Docker Swarm Manager Parameters'
@@ -32,8 +34,14 @@ Metadata:
       - HAProxyPassword
 
 Parameters:
-  ParentNetworkStack:
+  ParentVPCStack:
     Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
+    Type: String
+  ParentPublicZoneStack:
+    Description: 'Stack name of parent Hosted Zone stack based on dns/*-hosted-zone.yaml template.'
+    Type: String
+  ParentPrivateZoneStack:
+    Description: 'Stack name of parent Hosted Zone stack based on dns/*-hosted-zone.yaml template.'
     Type: String
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
@@ -125,7 +133,7 @@ Resources:
     Properties:
       GroupDescription: Allow SSH to the Docker Swarm Managers
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
       SecurityGroupIngress:
       # Port 22 is temporary, we will never need it in the future.
       - IpProtocol: tcp
@@ -138,143 +146,145 @@ Resources:
     Properties:
       GroupDescription: Docker Swarm Mode Security Groups
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: '2377'
         ToPort: '2377'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '7946'
         ToPort: '7946'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: udp
         FromPort: '7946'
         ToPort: '7946'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '4789'
         ToPort: '4789'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: udp
         FromPort: '4789'
         ToPort: '4789'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '44444'
         ToPort: '44444'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   ConsulClusterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Security group to allow Consul ports
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
       SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: '8300'
-        ToPort: '8302'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '8500'
         ToPort: '8500'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
-      - IpProtocol: tcp
-        FromPort: '8600'
-        ToPort: '8600'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   VaultClusterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Security group to allow vault ports
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: '8200'
         ToPort: '8200'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '8201'
         ToPort: '8201'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   HAProxySecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Security group to allow HTTP/HTTPS traffic
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: '80'
         ToPort: '80'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '443'
         ToPort: '443'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   HAProxyStatsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Security group to allow HTTP/HTTPS traffic
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: '1936'
         ToPort: '1936'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   InternalLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow traffic to the internal load balancer
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: '8500'
         ToPort: '8500'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '8200'
         ToPort: '8200'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '8201'
         ToPort: '8201'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '80'
         ToPort: '80'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
         FromPort: '1936'
         ToPort: '1936'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentNetworkStack}-CidrBlock'
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
+
+  ExternalLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow public traffic to the external load balancer
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -454,7 +464,7 @@ Resources:
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
   ConsulTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
@@ -473,7 +483,7 @@ Resources:
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
   VaultTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
@@ -492,7 +502,7 @@ Resources:
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
   VaultClusterTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
@@ -511,13 +521,13 @@ Resources:
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
   HAProxyHttpTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
       HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /healthcheck
+      HealthCheckPath: /health
       HealthCheckPort: 80
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 8
@@ -529,13 +539,13 @@ Resources:
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
   HAProxyStatsTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
       HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /healthcheck
+      HealthCheckPath: /health
       HealthCheckPort: 80
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 8
@@ -547,7 +557,7 @@ Resources:
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
-        'Fn::ImportValue': !Sub '${ParentNetworkStack}-VPC'
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
   SwarmManagerLaunchConfiguration:
     Metadata:
@@ -799,7 +809,7 @@ Resources:
 
                 frontend http-in
                     bind 0.0.0.0:80
-                    monitor-uri /healthcheck{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                    monitor-uri /health{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
                     # Edge for {{ $service.Name }}, Version: {{ $version }}
                     acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
                     use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
@@ -811,7 +821,7 @@ Resources:
                     mode http
                     balance roundrobin
                     option forwardfor
-                    option httpchk GET /healthcheck
+                    option httpchk GET /health
                     http-check expect ! rstatus ^5
                     default-server inter 2s fall 1 rise 2
                     reqrep ^([^\ ]*\ /)v{{ $version }}/{{ $service.Name }}[/]?(.*)     \1{{ $service.Name }}/\2{{range $c,$d:=service $service.Name}}{{ if $d.Tags | contains "edge" }}{{ if $d.Tags | contains (printf "%s%s" "version=" $version) }}
@@ -952,9 +962,9 @@ Resources:
         - !Ref HAProxyHttpTargetGroup
         - !Ref HAProxyStatsTargetGroup
       VPCZoneIdentifier:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
       NotificationConfigurations:
       - TopicARN:
           !Ref SwarmManagerAsgNotification
@@ -978,9 +988,9 @@ Resources:
       SecurityGroups:
         - !Ref InternalLoadBalancerSecurityGroup
       Subnets:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
 
   ExternalLoadBalancer:
     DependsOn:
@@ -989,11 +999,11 @@ Resources:
     Properties:
       Scheme: internet-facing
       SecurityGroups:
-        - !Ref HAProxySecurityGroup
+        - !Ref ExternalLoadBalancerSecurityGroup
       Subnets:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
 
   SwarmHealthCheckHttpListener:
     DependsOn:
@@ -1072,6 +1082,32 @@ Resources:
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 1936
       Protocol: HTTP
+
+  VaultPrivateDNS:
+    DependsOn:
+      - InternalLoadBalancer
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt InternalLoadBalancer.DNSName
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-HostedZoneId'
+
+  APIDNS:
+    DependsOn:
+      - ExternalLoadBalancer
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      Name: !Join [ '.', [ 'api', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt ExternalLoadBalancer.DNSName
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
 
   SwarmManagerLifecycleHook:
     DependsOn:

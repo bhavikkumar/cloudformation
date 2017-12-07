@@ -7,14 +7,15 @@ Metadata:
     - Label:
         default: 'Parent Stacks'
       Parameters:
-      - ParentNetworkStack
+      - ParentVPCStack
       - ParentAlertStack
       - SwarmManagerStack
     - Label:
         default: 'Docker Swarm Worker Parameters'
       Parameters:
       - WorkerInstanceType
-      - WorkerClusterSize
+      - DesiredWorkerClusterSize
+      - MaxWorkerClusterSize
       - WorkerDiskSize
       - WorkerDiskType
     - Label:
@@ -32,7 +33,7 @@ Metadata:
       - HAProxyPassword
 
 Parameters:
-  ParentNetworkStack:
+  ParentVPCStack:
     Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
     Type: String
   ParentAlertStack:
@@ -342,7 +343,7 @@ Resources:
 
                 frontend http-in
                     bind 0.0.0.0:80
-                    monitor-uri /healthcheck{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                    monitor-uri /health{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
                     # Edge for {{ $service.Name }}, Version: {{ $version }}
                     acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
                     use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
@@ -354,7 +355,7 @@ Resources:
                     mode http
                     balance roundrobin
                     option forwardfor
-                    option httpchk GET /healthcheck
+                    option httpchk GET /health
                     http-check expect ! rstatus ^5
                     default-server inter 2s fall 1 rise 2
                     reqrep ^([^\ ]*\ /)v{{ $version }}/{{ $service.Name }}[/]?(.*)     \1{{ $service.Name }}/\2{{range $c,$d:=service $service.Name}}{{ if $d.Tags | contains "edge" }}{{ if $d.Tags | contains (printf "%s%s" "version=" $version) }}
@@ -446,9 +447,9 @@ Resources:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsTargetGroup'
       VPCZoneIdentifier:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentNetworkStack}-SubnetsPublic"] ]
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
       NotificationConfigurations:
       - TopicARN:
           !Ref SwarmWorkerAsgNotification
