@@ -36,10 +36,12 @@ Conditions:
 Resources:
 
   Sumologic:
+    Condition: InternalBucket
     Type: "AWS::IAM::User"
     Properties: {}
 
   SumologicAccessKey:
+    Condition: InternalBucket
     Type: AWS::IAM::AccessKey
     Properties:
       UserName:
