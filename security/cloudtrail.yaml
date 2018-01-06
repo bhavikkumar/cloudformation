@@ -34,11 +34,40 @@ Conditions:
   InternalBucket: !Equals [!Ref ExternalTrailBucket, '']
   ExternalBucket: !Not [!Equals [!Ref ExternalTrailBucket, '']]
 Resources:
+  TrailAccessLogBucket:
+    Condition: InternalBucket
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: LogDeliveryWrite
+      LifecycleConfiguration:
+        Rules:
+          -
+            ExpirationInDays: 14
+            Id: DeleteInTwoWeeks
+            Status: Enabled
+    DeletionPolicy: Retain
+
   TrailBucket:
     Condition: InternalBucket
     Type: 'AWS::S3::Bucket'
-    Properties: {}
+    Properties:
+      LoggingConfiguration:
+        DestinationBucketName: !Ref TrailAccessLogBucket
+      LifecycleConfiguration:
+        Rules:
+          -
+            ExpirationInDays: 3650
+            Id: DeleteInTenYears
+            Status: Enabled
+            Transitions:
+              -
+                StorageClass: STANDARD_IA
+                TransitionInDays: 730
+              -
+                StorageClass: GLACIER
+                TransitionInDays: 1825
     DeletionPolicy: Retain
+
   TrailBucketPolicy:
     Condition: InternalBucket
     Type: 'AWS::S3::BucketPolicy'
