@@ -103,6 +103,27 @@ Resources:
             StringEquals:
               's3:x-amz-acl': 'bucket-owner-full-control'
 
+  TrailAccessLogBucketPolicy:
+    Condition: InternalBucket
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref TrailAccessLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: SumologicReadAccess
+          Effect: Allow
+          Principal:
+            AWS: !GetAtt Sumologic.Arn
+          Action:
+            - "s3:GetObject"
+            - "s3:GetObjectVersion"
+            - "s3:ListBucketVersions"
+            - "s3:ListBucket"
+          Resource:
+            - !Sub 'arn:aws:s3:::${TrailAccessLogBucket}'
+            - !Sub 'arn:aws:s3:::${TrailAccessLogBucket}/*'
+
   TrailLogGroup:
     Type: 'AWS::Logs::LogGroup'
     Properties:
