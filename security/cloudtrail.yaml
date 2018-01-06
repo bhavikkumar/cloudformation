@@ -34,11 +34,21 @@ Conditions:
   InternalBucket: !Equals [!Ref ExternalTrailBucket, '']
   ExternalBucket: !Not [!Equals [!Ref ExternalTrailBucket, '']]
 Resources:
+  TrailAccessLogBucket:
+    Condition: InternalBucket
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: LogDeliveryWrite
+    DeletionPolicy: Retain
+
   TrailBucket:
     Condition: InternalBucket
     Type: 'AWS::S3::Bucket'
-    Properties: {}
+    Properties:
+      LoggingConfiguration:
+        DestinationBucketName: !Ref TrailAccessLogBucket
     DeletionPolicy: Retain
+
   TrailBucketPolicy:
     Condition: InternalBucket
     Type: 'AWS::S3::BucketPolicy'

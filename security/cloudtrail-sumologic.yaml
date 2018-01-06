@@ -47,10 +47,19 @@ Resources:
       UserName:
         !Ref Sumologic
 
+  TrailAccessLogBucket:
+    Condition: InternalBucket
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: LogDeliveryWrite
+    DeletionPolicy: Retain
+
   TrailBucket:
     Condition: InternalBucket
     Type: 'AWS::S3::Bucket'
-    Properties: {}
+    Properties:
+      LoggingConfiguration:
+        DestinationBucketName: !Ref TrailAccessLogBucket
     DeletionPolicy: Retain
 
   TrailBucketPolicy:
