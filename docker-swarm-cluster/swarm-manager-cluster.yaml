@@ -23,11 +23,11 @@ Metadata:
         default: 'Consul Parameters'
       Parameters:
       - EncryptionToken
-    - Label:
-        default: 'TLS Certificate Parameters'
-      Parameters:
-      - CertificateS3Bucket
-      - CertificateFileName
+    # - Label:
+    #     default: 'TLS Certificate Parameters'
+    #   Parameters:
+    #   - CertificateS3Bucket
+    #   - CertificateFileName
     - Label:
         default: 'HA Proxy Parameters'
       Parameters:
@@ -149,12 +149,12 @@ Parameters:
     NoEcho: true
     Description: 'Secret key to use for encryption of Consul network traffic. This key must be 16-bytes that are Base64-encoded'
     Type: String
-  CertificateS3Bucket:
-    Description: 'Secure S3 Bucket which contains the required certificates'
-    Type: String
-  CertificateFileName:
-    Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
-    Type: String
+  # CertificateS3Bucket:
+  #   Description: 'Secure S3 Bucket which contains the required certificates'
+  #   Type: String
+  # CertificateFileName:
+  #   Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
+  #   Type: String
   HAProxyPassword:
     NoEcho: true
     Description: 'Password for HA Proxy Stats endpoint'
@@ -434,22 +434,22 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
-  CertificateBucketPolicy:
-    DependsOn:
-      - SwarmManagerRole
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: "swarm-manager-certificate-download-policy"
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "s3:GetObject"
-            Resource: !Sub 'arn:aws:s3:::${CertificateS3Bucket}/*'
-      Roles:
-        - !Ref SwarmManagerRole
+  # CertificateBucketPolicy:
+  #   DependsOn:
+  #     - SwarmManagerRole
+  #   Type: AWS::IAM::Policy
+  #   Properties:
+  #     PolicyName: "swarm-manager-certificate-download-policy"
+  #     PolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         -
+  #           Effect: "Allow"
+  #           Action:
+  #             - "s3:GetObject"
+  #           Resource: !Sub 'arn:aws:s3:::${CertificateS3Bucket}/*'
+  #     Roles:
+  #       - !Ref SwarmManagerRole
 
   SwarmLifecycleQueue:
     Type: AWS::SQS::Queue
@@ -605,13 +605,13 @@ Resources:
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
-      AWS::CloudFormation::Authentication:
-        rolebased:
-          type: "S3"
-          buckets:
-            - !Ref CertificateS3Bucket
-          roleName:
-            Ref: SwarmManagerRole
+      # AWS::CloudFormation::Authentication:
+      #   rolebased:
+      #     type: "S3"
+      #     buckets:
+      #       - !Ref CertificateS3Bucket
+      #     roleName:
+      #       Ref: SwarmManagerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
@@ -620,13 +620,13 @@ Resources:
             - init_aws_swarm
             - swarm_node_healthcheck
             - guide_aws_swarm
-            - certificates
+            # - certificates
             - consul
             - vault
             - haproxy
           update_install:
             - install_cfn
-            - certificates
+            # - certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -814,12 +814,12 @@ Resources:
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
-        certificates:
-          sources:
-            /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
-          commands:
-            config_file_permission:
-              command: "chmod 400 /opt/certificates/*"
+        # certificates:
+        #   sources:
+        #     /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
+        #   commands:
+        #     config_file_permission:
+        #       command: "chmod 400 /opt/certificates/*"
         haproxy:
           files:
             /opt/haproxy/haproxy.json:
