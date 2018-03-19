@@ -61,28 +61,71 @@ Parameters:
       - t2.micro
       - t2.small
       - t2.medium
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
       - m4.large
       - m4.xlarge
       - m4.2xlarge
       - m4.4xlarge
       - m4.10xlarge
+      - m4.16xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - m5.12xlarge
+      - m5.24xlarge
       - c4.large
       - c4.xlarge
       - c4.2xlarge
       - c4.4xlarge
       - c4.8xlarge
+      - c5.large
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+      - c5.18xlarge
       - r4.large
       - r4.xlarge
       - r4.2xlarge
       - r4.4xlarge
       - r4.8xlarge
       - r4.16xlarge
+      - x1.16xlarge
+      - x1.32xlarge
+      - x1e.xlarge
+      - x1e.2xlarge
+      - x1e.4xlarge
+      - x1e.8xlarge
+      - x1e.16xlarge
+      - x1e.32xlarge
+      - d2.xlarge
+      - d2.2xlarge
+      - d2.4xlarge
+      - d2.8xlarge
+      - h1.2xlarge
+      - h1.4xlarge
+      - h1.8xlarge
+      - h1.16xlarge
       - i3.large
       - i3.xlarge
       - i3.2xlarge
       - i3.4xlarge
       - i3.8xlarge
       - i3.16xlarge
+      - f1.2xlarge
+      - f1.16xlarge
+      - g3.4xlarge
+      - g3.8xlarge
+      - g3.16xlarge
+      - p2.xlarge
+      - p2.8xlarge
+      - p2.16xlarge
+      - p3.2xlarge
+      - p3.8xlarge
+      - p3.16xlarge
   WorkerDiskSize:
     Description: Size of Manager's ephemeral storage volume in GiB
     Type: Number
@@ -479,9 +522,8 @@ Resources:
       RoleARN: !GetAtt SwarmWorkerRole.Arn
 
 Mappings:
+  # This list comes from https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html#AvailableInstanceTypes
   AWSInstanceType2Arch:
-    t1.micro:
-      Arch: PV64
     t2.nano:
       Arch: HVM64
     t2.micro:
@@ -492,27 +534,9 @@ Mappings:
       Arch: HVM64
     t2.large:
       Arch: HVM64
-    m1.small:
-      Arch: PV64
-    m1.medium:
-      Arch: PV64
-    m1.large:
-      Arch: PV64
-    m1.xlarge:
-      Arch: PV64
-    m2.xlarge:
-      Arch: PV64
-    m2.2xlarge:
-      Arch: PV64
-    m2.4xlarge:
-      Arch: PV64
-    m3.medium:
+    t2.xlarge:
       Arch: HVM64
-    m3.large:
-      Arch: HVM64
-    m3.xlarge:
-      Arch: HVM64
-    m3.2xlarge:
+    t2.2xlarge:
       Arch: HVM64
     m4.large:
       Arch: HVM64
@@ -524,19 +548,17 @@ Mappings:
       Arch: HVM64
     m4.10xlarge:
       Arch: HVM64
-    c1.medium:
-      Arch: PV64
-    c1.xlarge:
-      Arch: PV64
-    c3.large:
+    m5.large:
       Arch: HVM64
-    c3.xlarge:
+    m5.xlarge:
       Arch: HVM64
-    c3.2xlarge:
+    m5.2xlarge:
       Arch: HVM64
-    c3.4xlarge:
+    m5.4xlarge:
       Arch: HVM64
-    c3.8xlarge:
+    m5.12xlarge:
+      Arch: HVM64
+    m5.24xlarge:
       Arch: HVM64
     c4.large:
       Arch: HVM64
@@ -548,27 +570,45 @@ Mappings:
       Arch: HVM64
     c4.8xlarge:
       Arch: HVM64
-    g2.2xlarge:
-      Arch: HVMG2
-    g2.8xlarge:
-      Arch: HVMG2
-    r3.large:
+    c5.large:
       Arch: HVM64
-    r3.xlarge:
+    c5.xlarge:
       Arch: HVM64
-    r3.2xlarge:
+    c5.2xlarge:
       Arch: HVM64
-    r3.4xlarge:
+    c5.4xlarge:
       Arch: HVM64
-    r3.8xlarge:
+    c5.9xlarge:
       Arch: HVM64
-    i2.xlarge:
+    c5.18xlarge:
       Arch: HVM64
-    i2.2xlarge:
+    r4.large:
       Arch: HVM64
-    i2.4xlarge:
+    r4.xlarge:
       Arch: HVM64
-    i2.8xlarge:
+    r4.2xlarge:
+      Arch: HVM64
+    r4.4xlarge:
+      Arch: HVM64
+    r4.8xlarge:
+      Arch: HVM64
+    r4.16xlarge:
+      Arch: HVM64
+    x1.16xlarge:
+      Arch: HVM64
+    x1.32xlarge:
+      Arch: HVM64
+    x1e.xlarge:
+      Arch: HVM64
+    x1e.2xlarge:
+      Arch: HVM64
+    x1e.4xlarge:
+      Arch: HVM64
+    x1e.8xlarge:
+      Arch: HVM64
+    x1e.16xlarge:
+      Arch: HVM64
+    x1e.32xlarge:
       Arch: HVM64
     d2.xlarge:
       Arch: HVM64
@@ -578,176 +618,92 @@ Mappings:
       Arch: HVM64
     d2.8xlarge:
       Arch: HVM64
-    hi1.4xlarge:
+    h1.2xlarge:
       Arch: HVM64
-    hs1.8xlarge:
+    h1.4xlarge:
       Arch: HVM64
-    cr1.8xlarge:
+    h1.8xlarge:
       Arch: HVM64
-    cc2.8xlarge:
+    h1.16xlarge:
       Arch: HVM64
-  AWSInstanceType2NATArch:
-    t1.micro:
-      Arch: NATPV64
-    t2.nano:
-      Arch: NATHVM64
-    t2.micro:
-      Arch: NATHVM64
-    t2.small:
-      Arch: NATHVM64
-    t2.medium:
-      Arch: NATHVM64
-    t2.large:
-      Arch: NATHVM64
-    m1.small:
-      Arch: NATPV64
-    m1.medium:
-      Arch: NATPV64
-    m1.large:
-      Arch: NATPV64
-    m1.xlarge:
-      Arch: NATPV64
-    m2.xlarge:
-      Arch: NATPV64
-    m2.2xlarge:
-      Arch: NATPV64
-    m2.4xlarge:
-      Arch: NATPV64
-    m3.medium:
-      Arch: NATHVM64
-    m3.large:
-      Arch: NATHVM64
-    m3.xlarge:
-      Arch: NATHVM64
-    m3.2xlarge:
-      Arch: NATHVM64
-    m4.large:
-      Arch: NATHVM64
-    m4.xlarge:
-      Arch: NATHVM64
-    m4.2xlarge:
-      Arch: NATHVM64
-    m4.4xlarge:
-      Arch: NATHVM64
-    m4.10xlarge:
-      Arch: NATHVM64
-    c1.medium:
-      Arch: NATPV64
-    c1.xlarge:
-      Arch: NATPV64
-    c3.large:
-      Arch: NATHVM64
-    c3.xlarge:
-      Arch: NATHVM64
-    c3.2xlarge:
-      Arch: NATHVM64
-    c3.4xlarge:
-      Arch: NATHVM64
-    c3.8xlarge:
-      Arch: NATHVM64
-    c4.large:
-      Arch: NATHVM64
-    c4.xlarge:
-      Arch: NATHVM64
-    c4.2xlarge:
-      Arch: NATHVM64
-    c4.4xlarge:
-      Arch: NATHVM64
-    c4.8xlarge:
-      Arch: NATHVM64
-    g2.2xlarge:
-      Arch: NATHVMG2
-    g2.8xlarge:
-      Arch: NATHVMG2
-    r3.large:
-      Arch: NATHVM64
-    r3.xlarge:
-      Arch: NATHVM64
-    r3.2xlarge:
-      Arch: NATHVM64
-    r3.4xlarge:
-      Arch: NATHVM64
-    r3.8xlarge:
-      Arch: NATHVM64
-    i2.xlarge:
-      Arch: NATHVM64
-    i2.2xlarge:
-      Arch: NATHVM64
-    i2.4xlarge:
-      Arch: NATHVM64
-    i2.8xlarge:
-      Arch: NATHVM64
-    d2.xlarge:
-      Arch: NATHVM64
-    d2.2xlarge:
-      Arch: NATHVM64
-    d2.4xlarge:
-      Arch: NATHVM64
-    d2.8xlarge:
-      Arch: NATHVM64
-    hi1.4xlarge:
-      Arch: NATHVM64
-    hs1.8xlarge:
-      Arch: NATHVM64
-    cr1.8xlarge:
-      Arch: NATHVM64
-    cc2.8xlarge:
-      Arch: NATHVM64
+    i3.large:
+      Arch: HVM64
+    i3.xlarge:
+      Arch: HVM64
+    i3.2xlarge:
+      Arch: HVM64
+    i3.4xlarge:
+      Arch: HVM64
+    i3.8xlarge:
+      Arch: HVM64
+    i3.16xlarge:
+      Arch: HVM64
+    f1.2xlarge:
+      Arch: HVM64
+    f1.16xlarge:
+      Arch: HVM64
+    g3.4xlarge:
+      Arch: HVM64
+    g3.8xlarge:
+      Arch: HVM64
+    g3.16xlarge:
+      Arch: HVM64
+    p2.xlarge:
+      Arch: HVM64
+    p2.8xlarge:
+      Arch: HVM64
+    p2.16xlarge:
+      Arch: HVM64
+    p3.2xlarge:
+      Arch: HVM64
+    p3.8xlarge:
+      Arch: HVM64
+    p3.16xlarge:
+      Arch: HVM64
   # This list comes from https://aws.amazon.com/amazon-linux-ami/
   AWSRegionArch2AMI:
     us-east-1:
-      PV64: ami-abc1ebbd
-      HVM64: ami-a4c7edb2
-      HVMG2: ami-a41a3fb3
+      HVM64: ami-97785bed
+      HVMG2: ami-0a6e3770
     us-east-2:
-      PV64: NOT_SUPPORTED
-      HVM64: ami-8a7859ef
+      HVM64: ami-f63b1193
       HVMG2: NOT_SUPPORTED
     us-west-2:
-      PV64: ami-98f3e7e1
-      HVM64: ami-6df1e514
-      HVMG2: ami-caf253aa
+      HVM64: ami-f2d3638a
+      HVMG2: ami-ee15a196
     us-west-1:
-      PV64: ami-347e5254
-      HVM64: ami-327f5352
-      HVMG2: ami-00347e60
+      HVM64: ami-824c4ee2
+      HVMG2: ami-0da4a46d
     ca-central-1:
-      PV64: NOT_SUPPORTED
-      HVM64: ami-a7aa15c3
+      HVM64: ami-a954d1cd
       HVMG2: NOT_SUPPORTED
     eu-west-1:
-      PV64: ami-c4bba0a2
-      HVM64: ami-d7b9a2b1
-      HVMG2: ami-e2f7bd91
+      HVM64: ami-d834aba1
+      HVMG2: ami-af8013d6
     eu-west-2:
-      PV64: NOT_SUPPORTED
-      HVM64: ami-ed100689
+      HVM64: ami-403e2524
+      HVMG2: NOT_SUPPORTED
+    eu-west-3:
+      HVM64: ami-8ee056f3
       HVMG2: NOT_SUPPORTED
     eu-central-1:
-      PV64: ami-4dbc1a22
-      HVM64: ami-82be18ed
-      HVMG2: ami-d2ff04bd
+      HVM64: ami-5652ce39
+      HVMG2: ami-1d58ca72
     ap-southeast-1:
-      PV64: ami-42901f21
-      HVM64: ami-77af2014
-      HVMG2: ami-f3f95990
+      HVM64: ami-68097514
+      HVMG2: ami-c06013bc
     ap-northeast-2:
-      PV64: NOT_SUPPORTED
-      HVM64: ami-e21cc38c
+      HVM64: ami-863090e8
       HVMG2: NOT_SUPPORTED
     ap-northeast-1:
-      PV64: ami-d3d3c4b4
-      HVM64: ami-3bd3c45c
-      HVMG2: ami-4c78d52d
+      HVM64: ami-ceafcba8
+      HVMG2: ami-edfd658b
     ap-southeast-2:
-      PV64: ami-43918120
-      HVM64: ami-10918173
-      HVMG2: ami-3a122e59
+      HVM64: ami-942dd1f6
+      HVMG2: ami-85ef12e7
     ap-south-1:
-      PV64: NOT_SUPPORTED
-      HVM64: ami-47205e28
-      HVMG2: NOT_SUPPORTED
+      HVM64: ami-531a4c3c
+      HVMG2: ami-411e492e
     sa-east-1:
-      PV64: ami-1cdab170
-      HVM64: ami-87dab1eb
+      HVM64: ami-84175ae8
       HVMG2: NOT_SUPPORTED
