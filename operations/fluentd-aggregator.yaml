@@ -325,7 +325,7 @@ Resources:
                   <match rsyslog.**>
                     @type sumologic
                     endpoint ${SumoLogicSysLogCollector}
-                    log_format   text
+                    log_format   json
                     source_category ${Environment}/linux/syslog
                     open_timeout 10
                   </match>
