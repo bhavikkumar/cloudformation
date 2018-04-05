@@ -12,6 +12,12 @@ Metadata:
       - ParentPrivateZoneStack
       - ParentAlertStack
     - Label:
+        default: 'Sumologic Parameters'
+      Parameters:
+      - SumoLogicSysLogCollector
+      - SumoLogicDefaultCollector
+      - Environment
+    - Label:
         default: 'Log Aggregator Parameters'
       Parameters:
       - KeyName
@@ -37,6 +43,23 @@ Parameters:
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
     Type: String
+  SumoLogicSysLogCollector:
+    Description: 'The SumoLogic HTTP collector URL where syslogs should be sent'
+    Type: String
+    NoEcho: true
+  SumoLogicDefaultCollector:
+    Description: 'The SumoLogic HTTP collector URL where unmatched logs should be sent'
+    Type: String
+    NoEcho: true
+  Environment:
+    Description: 'The enviornment that the stack is being deployed in'
+    Type: String
+    Default: playground
+    AllowedValues:
+      - playground
+      - dev
+      - demo
+      - prod
   KeyName:
     Description: Amazon EC2 Key Pair
     Type: "AWS::EC2::KeyPair::KeyName"
@@ -180,6 +203,11 @@ Resources:
         ToPort: '5140'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '15140'
+        ToPort: '15140'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   LogAggLaunchConfiguration:
     Metadata:
@@ -266,59 +294,54 @@ Resources:
         configure_fluentd:
           files:
             /etc/fluentd.conf:
-              content: |
+              content: !Sub |
                 <source>
                   @type  forward
-                  @id    input1
+                  @id    general_input
                   @label @mainstream
                   port  24224
-                  protocol_type tcp
+                </source>
+                <source>
+                  @type  forward
+                  @id    syslog_input
+                  @label @system
+                  port  15140
+                  <parse>
+                    message_format auto
+                  </parse>
                 </source>
                 <source>
                   @type syslog
-                  @id syslog_input
+                  @id local_syslog_input
                   @label @system
                   port 5140
                   protocol_type tcp
                   tag rsyslog
+                  <parse>
+                    message_format auto
+                  </parse>
                 </source>
                 <label @system>
                   <match rsyslog.**>
-                    @type file
-                    @id   output_syslog
-                    path         /fluentd/log/syslog.*.log
-                    symlink_path /fluentd/log/syslog.log
-                    append       true
-                    time_slice_format %Y%m%d
-                    time_slice_wait   1m
-                    time_format       %Y%m%dT%H%M%S%z
+                    @type sumologic
+                    endpoint ${SumoLogicSysLogCollector}
+                    log_format   text
+                    source_category ${Environment}/linux/syslog
+                    open_timeout 10
                   </match>
                 </label>
                 <label @mainstream>
-                  <match docker.**>
-                    @type file
-                    @id   output_docker1
-                    path         /fluentd/log/docker.*.log
-                    symlink_path /fluentd/log/docker.log
-                    append       true
-                    time_slice_format %Y%m%d
-                    time_slice_wait   1m
-                    time_format       %Y%m%dT%H%M%S%z
-                  </match>
                   <match **>
-                    @type file
-                    @id   output1
-                    path         /fluentd/log/data.*.log
-                    symlink_path /fluentd/log/data.log
-                    append       true
-                    time_slice_format %Y%m%d
-                    time_slice_wait   10m
-                    time_format       %Y%m%dT%H%M%S%z
+                    @type sumologic
+                    endpoint ${SumoLogicDefaultCollector}
+                    log_format   json
+                    source_category ${Environment}/unknown
+                    open_timeout 10
                   </match>
                 </label>
           commands:
             run_fluentd:
-              command: "docker run -d -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf -v /data:/fluentd/log fluent/fluentd"
+              command: "docker run -d -p 24224:24224 -p 5140:5140 -p 15140:15140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
 
         # certificates:
