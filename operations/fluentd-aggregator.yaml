@@ -208,6 +208,11 @@ Resources:
         ToPort: '15140'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '24220'
+        ToPort: '24220'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   LogAggLaunchConfiguration:
     Metadata:
@@ -295,6 +300,14 @@ Resources:
           files:
             /etc/fluentd.conf:
               content: !Sub |
+                <system>
+                  log_level warn
+                </system>
+                <source>
+                  @type monitor_agent
+                  include_config false
+                  port 24220
+                </source>
                 <source>
                   @type  forward
                   @id    general_input
@@ -306,9 +319,6 @@ Resources:
                   @id    syslog_input
                   @label @system
                   port  15140
-                  <parse>
-                    message_format auto
-                  </parse>
                 </source>
                 <source>
                   @type syslog
@@ -328,6 +338,12 @@ Resources:
                     log_format   json
                     source_category ${Environment}/linux/syslog
                     open_timeout 10
+                    <buffer>
+                      @type file
+                      path /fluentd/log/rsyslog.buffer
+                      flush_interval 10s
+                      retry_wait 20s
+                    </buffer>
                   </match>
                 </label>
                 <label @mainstream>
@@ -337,11 +353,17 @@ Resources:
                     log_format   json
                     source_category ${Environment}/unknown
                     open_timeout 10
+                    <buffer>
+                      @type file
+                      path /fluentd/log/mainstream.buffer
+                      flush_interval 10s
+                      retry_wait 20s
+                    </buffer>
                   </match>
                 </label>
           commands:
             run_fluentd:
-              command: "docker run -d -p 24224:24224 -p 5140:5140 -p 15140:15140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
+              command: "docker run -d -p 24220:24220 -p 24224:24224 -p 5140:5140 -p 15140:15140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
 
         # certificates:
