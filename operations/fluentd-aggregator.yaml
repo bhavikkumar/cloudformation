@@ -173,19 +173,6 @@ Resources:
       DisplayName: 'Log Aggregator ASG Notifications'
       TopicName: 'LogAggNotifications'
 
-  SSHSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow SSH to the Log Aggregators
-      VpcId:
-        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
-      SecurityGroupIngress:
-      # Port 22 is temporary, we will never need it in the future.
-      - IpProtocol: tcp
-        FromPort: '22'
-        ToPort: '22'
-        CidrIp: 0.0.0.0/0
-
   LogAggregatorSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -206,11 +193,6 @@ Resources:
       - IpProtocol: tcp
         FromPort: '15140'
         ToPort: '15140'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
-      - IpProtocol: tcp
-        FromPort: '24220'
-        ToPort: '24220'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
@@ -304,11 +286,6 @@ Resources:
                   log_level warn
                 </system>
                 <source>
-                  @type monitor_agent
-                  include_config false
-                  port 24220
-                </source>
-                <source>
                   @type  forward
                   @id    general_input
                   @label @mainstream
@@ -363,7 +340,7 @@ Resources:
                 </label>
           commands:
             run_fluentd:
-              command: "docker run -d -p 24220:24220 -p 24224:24224 -p 5140:5140 -p 15140:15140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
+              command: "docker run -d -p 24224:24224 -p 5140:5140 -p 15140:15140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
 
         # certificates:
@@ -373,7 +350,6 @@ Resources:
         #     config_file_permission:
         #       command: "chmod 400 /opt/certificates/*"
     DependsOn:
-      - SSHSecurityGroup
       - LogAggregatorSecurityGroup
 #      - LogAggInstanceProfile
     Type: AWS::AutoScaling::LaunchConfiguration
@@ -389,7 +365,6 @@ Resources:
 #      IamInstanceProfile: !Ref LogAggInstanceProfile
       KeyName: !Ref KeyName
       SecurityGroups:
-        - !Ref SSHSecurityGroup
         - !Ref LogAggregatorSecurityGroup
       UserData:
         "Fn::Base64":
