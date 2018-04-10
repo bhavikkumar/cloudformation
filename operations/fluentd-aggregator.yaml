@@ -67,7 +67,9 @@ Parameters:
     Description: The number of log aggregators
     Default: 1
     Type: Number
-    MaxValue: 6
+    MinValue: 1
+    MaxValue: 3
+    ConstraintDescription: The number of log aggregators is invalid.
   InstanceType:
     Description: EC2 instance type
     Type: String
@@ -148,6 +150,7 @@ Parameters:
     MinValue: 8
     Default: 8
     MaxValue: 1024
+    ConstraintDescription: The storage size is invalid.
   DiskType:
     Description: Ephemeral storage volume type
     Type: String
@@ -185,16 +188,32 @@ Resources:
         ToPort: '24224'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
-      - IpProtocol: tcp
-        FromPort: '5140'
-        ToPort: '5140'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
-      - IpProtocol: tcp
-        FromPort: '15140'
-        ToPort: '15140'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
+
+  LogAggNetworkLoadBalancer:
+    DependsOn:
+      - LogAggregatorSecurityGroup
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Scheme: internal
+      Type: network
+      Subnets:
+        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+
+  LogAggregatorTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: TCP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 3
+      Name: !Join ['-', [ !Ref "AWS::StackName", NodeHealthCheck ] ]
+      Port: 24224
+      Protocol: TCP
+      UnhealthyThresholdCount: 3
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
   LogAggLaunchConfiguration:
     Metadata:
@@ -205,7 +224,7 @@ Resources:
       #     buckets:
       #       - !Ref CertificateS3Bucket
       #     roleName:
-      #       Ref: SwarmManagerRole
+      #       Ref: LogAggregatorRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
@@ -351,7 +370,6 @@ Resources:
         #       command: "chmod 400 /opt/certificates/*"
     DependsOn:
       - LogAggregatorSecurityGroup
-#      - LogAggInstanceProfile
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -362,7 +380,6 @@ Resources:
             VolumeType: !Ref DiskType
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'InstanceType', Arch]]
       InstanceType: !Ref InstanceType
-#      IamInstanceProfile: !Ref LogAggInstanceProfile
       KeyName: !Ref KeyName
       SecurityGroups:
         - !Ref LogAggregatorSecurityGroup
@@ -379,26 +396,29 @@ Resources:
     DependsOn:
       - LogAggAsgNotification
       - LogAggLaunchConfiguration
+      - LogAggregatorTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
-        Timeout: PT5M
+        Timeout: PT10M
         Count: !Ref ClusterSize
     UpdatePolicy:
       AutoScalingRollingUpdate:
-        MaxBatchSize: 2
+        MaxBatchSize: 1
         MinInstancesInService: !Ref ClusterSize
-        PauseTime: PT5M
+        PauseTime: PT10M
         WaitOnResourceSignals: true
     Properties:
       MinSize: !Ref ClusterSize
-      MaxSize: 6
+      MaxSize: 3
       DesiredCapacity: !Ref ClusterSize
       HealthCheckType: EC2
       HealthCheckGracePeriod: 300
       LaunchConfigurationName: !Ref LogAggLaunchConfiguration
       MetricsCollection:
         - Granularity: 1Minute
+      TargetGroupARNs:
+        - !Ref LogAggregatorTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
@@ -416,6 +436,42 @@ Resources:
           Key: node-type
           PropagateAtLaunch: true
           Value: log-aggregator
+
+  LogAggregatorTCPListener:
+    DependsOn:
+      - LogAggregatorTargetGroup
+      - LogAggNetworkLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref LogAggregatorTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref LogAggNetworkLoadBalancer
+      Port: 24224
+      Protocol: TCP
+
+  LogAggregatorDNS:
+    DependsOn:
+      - LogAggNetworkLoadBalancer
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      Name: !Join [ '.', [ 'fluent', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt LogAggNetworkLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt LogAggNetworkLoadBalancer.DNSName
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-HostedZoneId'
+
+Outputs:
+  LogAggAsgNotificationTopic:
+    Description: The ASG notification topic of log aggregators being started or terminated.
+    Value: !Ref LogAggAsgNotification
+  LogAggregatorDNS:
+    Description: The DNS record for the log aggregator
+    Value: !Ref LogAggregatorDNS
+    Export:
+      Name: !Sub '${AWS::StackName}-LogAggregatorDNS'
 
 Mappings:
   # This list comes from https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html#AvailableInstanceTypes
