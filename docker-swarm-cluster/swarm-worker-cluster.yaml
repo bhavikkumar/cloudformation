@@ -10,6 +10,7 @@ Metadata:
       - ParentVPCStack
       - ParentAlertStack
       - SwarmManagerStack
+      - LogAggregatorDNS
     - Label:
         default: 'Docker Swarm Worker Parameters'
       Parameters:
@@ -41,6 +42,9 @@ Parameters:
     Type: String
   SwarmManagerStack:
     Description: 'The swarm manager stack which we will be joining the workers too.'
+    Type: String
+  LogAggregatorDNS:
+    Description: 'The log aggregator DNS which was created using operations/fluentd-aggregator.yaml template'
     Type: String
   DesiredWorkerClusterSize:
     Description: The desired number of swarm worker nodes
@@ -280,6 +284,7 @@ Resources:
           full_install:
             - install_cfn
             - install_docker
+            - setup_logging
             # - certificates
             - consul_config
             - haproxy_config
@@ -320,6 +325,80 @@ Resources:
               docker:
                 enabled: 'true'
                 ensureRunning: 'true'
+        setup_logging:
+          services:
+            sysvinit:
+              rsyslog:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                  - "/etc/rsyslog.d/10-ship-syslog.conf"
+          files:
+            /etc/rsyslog.d/10-ship-syslog.conf:
+              content: |
+                # ### begin forwarding rule ###
+                # The statement between the begin ... end define a SINGLE forwarding
+                # rule. They belong together, do NOT split them. If you create multiple
+                # forwarding rules, duplicate the whole block!
+                # Remote Logging (we use TCP for reliable delivery)
+                #
+                # An on-disk queue is created for this action. If the remote host is
+                # down, messages are spooled to disk and sent when it is up again.
+                $WorkDirectory /var/lib/rsyslog # where to place spool files
+                $ActionQueueFileName fluentdq # unique name prefix for spool files
+                $ActionQueueMaxDiskSpace 1g   # 1gb space limit (use as much as possible)
+                $ActionQueueSaveOnShutdown on # save messages to disk on shutdown
+                $ActionQueueType LinkedList   # run asynchronously
+                $ActionResumeRetryCount -1    # infinite retries if host is down
+                # remote host is: name/ip:port, e.g. 192.168.0.1:514, port optional
+                *.* @@localhost:5140
+                # ### end of the forwarding rule ###
+            /etc/fluentd.conf:
+              content: !Sub |
+                <system>
+                  log_level warn
+                </system>
+                <source>
+                  @type  forward
+                  @id    local_general_input
+                  port  24224
+                </source>
+                <source>
+                  @type syslog
+                  @id local_syslog_input
+                  port 5140
+                  protocol_type tcp
+                  tag rsyslog
+                  <parse>
+                    message_format auto
+                  </parse>
+                </source>
+                <filter **>
+                  @type record_transformer
+                  <record>
+                    host "#{Socket.gethostname}"
+                  </record>
+                </filter>
+                <match **>
+                  @type forward
+                  send_timeout 60s
+                  recover_wait 10s
+                  hard_timeout 60s
+                  <server>
+                    host ${LogAggregatorDNS}
+                    port 24224
+                  </server>
+                  <buffer>
+                    @type file
+                    path /fluentd/log/forward.buffer
+                    flush_interval 10s
+                    retry_wait 20s
+                  </buffer>
+                </match>
+          commands:
+            run_fluentd:
+              command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
+              cwd: "~"
         # certificates:
         #   sources:
         #     /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
@@ -422,14 +501,14 @@ Resources:
         init_aws_swarm:
           commands:
             docker_run:
-              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
+              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
               env:
                 DYNAMODB_TABLE: { "Fn::ImportValue" : { "Fn::Sub" : "${SwarmManagerStack}-SwarmTableName" } }
               cwd: "~"
         swarm_node_healthcheck:
           commands:
             docker_run:
-              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock bhavikk/swarm-node-healthcheck:latest"
+              command: "docker run --log-driver=fluentd -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock bhavikk/swarm-node-healthcheck:latest"
               cwd: "~"
     DependsOn:
       - SwarmWorkerInstanceProfile

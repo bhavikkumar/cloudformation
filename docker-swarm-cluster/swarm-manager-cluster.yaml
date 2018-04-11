@@ -11,6 +11,7 @@ Metadata:
       - ParentPublicZoneStack
       - ParentPrivateZoneStack
       - ParentAlertStack
+      - LogAggregatorDNS
     - Label:
         default: 'Docker Swarm Manager Parameters'
       Parameters:
@@ -45,6 +46,9 @@ Parameters:
     Type: String
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
+    Type: String
+  LogAggregatorDNS:
+    Description: 'The log aggregator DNS which was created using operations/fluentd-aggregator.yaml template'
     Type: String
   KeyName:
     Description: Amazon EC2 Key Pair
@@ -617,6 +621,7 @@ Resources:
           full_install:
             - install_cfn
             - install_docker
+            - setup_logging
             - init_aws_swarm
             - swarm_node_healthcheck
             - guide_aws_swarm
@@ -659,22 +664,96 @@ Resources:
               docker:
                 enabled: 'true'
                 ensureRunning: 'true'
+        setup_logging:
+          services:
+            sysvinit:
+              rsyslog:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                  - "/etc/rsyslog.d/10-ship-syslog.conf"
+          files:
+            /etc/rsyslog.d/10-ship-syslog.conf:
+              content: |
+                # ### begin forwarding rule ###
+                # The statement between the begin ... end define a SINGLE forwarding
+                # rule. They belong together, do NOT split them. If you create multiple
+                # forwarding rules, duplicate the whole block!
+                # Remote Logging (we use TCP for reliable delivery)
+                #
+                # An on-disk queue is created for this action. If the remote host is
+                # down, messages are spooled to disk and sent when it is up again.
+                $WorkDirectory /var/lib/rsyslog # where to place spool files
+                $ActionQueueFileName fluentdq # unique name prefix for spool files
+                $ActionQueueMaxDiskSpace 1g   # 1gb space limit (use as much as possible)
+                $ActionQueueSaveOnShutdown on # save messages to disk on shutdown
+                $ActionQueueType LinkedList   # run asynchronously
+                $ActionResumeRetryCount -1    # infinite retries if host is down
+                # remote host is: name/ip:port, e.g. 192.168.0.1:514, port optional
+                *.* @@localhost:5140
+                # ### end of the forwarding rule ###
+            /etc/fluentd.conf:
+              content: !Sub |
+                <system>
+                  log_level warn
+                </system>
+                <source>
+                  @type  forward
+                  @id    local_general_input
+                  port  24224
+                </source>
+                <source>
+                  @type syslog
+                  @id local_syslog_input
+                  port 5140
+                  protocol_type tcp
+                  tag rsyslog
+                  <parse>
+                    message_format auto
+                  </parse>
+                </source>
+                <filter **>
+                  @type record_transformer
+                  <record>
+                    host "#{Socket.gethostname}"
+                  </record>
+                </filter>
+                <match **>
+                  @type forward
+                  send_timeout 60s
+                  recover_wait 10s
+                  hard_timeout 60s
+                  <server>
+                    host ${LogAggregatorDNS}
+                    port 24224
+                  </server>
+                  <buffer>
+                    @type file
+                    path /fluentd/log/forward.buffer
+                    flush_interval 10s
+                    retry_wait 20s
+                  </buffer>
+                </match>
+          commands:
+            run_fluentd:
+              command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
+              cwd: "~"
         init_aws_swarm:
           commands:
             docker_run:
-              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
+              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
               cwd: "~"
         swarm_node_healthcheck:
           commands:
             docker_run:
-              command: "docker run -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock bhavikk/swarm-node-healthcheck:latest"
+              command: "docker run --log-driver=fluentd -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock bhavikk/swarm-node-healthcheck:latest"
               cwd: "~"
         guide_aws_swarm:
           commands:
             docker_run:
-              command: "docker run -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/guide-aws-swarm:latest"
+              command: "docker run --log-driver=fluentd -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/guide-aws-swarm:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
                 LIFECYCLE_QUEUE: { "Ref" : "SwarmLifecycleQueue" }
@@ -718,6 +797,8 @@ Resources:
                 services:
                   server:
                     image: consul:latest
+                    logging:
+                      driver: "fluentd"
                     networks:
                       default_net:
                         aliases:
@@ -745,6 +826,8 @@ Resources:
                           - node.role == manager
                   agent:
                     image: consul:latest
+                    logging:
+                      driver: "fluentd"
                     networks:
                       default_net:
                         aliases:
@@ -805,12 +888,12 @@ Resources:
             config_file_permission:
               command: "chmod 644 /opt/vault/vault.hcl"
             docker_run:
-              command: "docker run -d --name vault --net=host --restart=always -e 'VAULT_REDIRECT_INTERFACE=eth0' -e VAULT_CLUSTER_ADDR=$VAULT_CLUSTER_ADDR -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
+              command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e 'VAULT_REDIRECT_INTERFACE=eth0' -e VAULT_CLUSTER_ADDR=$VAULT_CLUSTER_ADDR -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
               env:
                 VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
               cwd: "~"
             init_vault:
-              command: "docker run --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' bhavikk/init-vault:latest"
+              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' bhavikk/init-vault:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
@@ -890,6 +973,8 @@ Resources:
                 services:
                   server:
                     image: bhavikk/haproxy-consul-template
+                    logging:
+                      driver: "fluentd"
                     networks:
                       default_net:
                         aliases:
