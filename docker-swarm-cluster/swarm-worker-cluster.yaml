@@ -23,6 +23,8 @@ Metadata:
         default: 'Consul Parameters'
       Parameters:
       - EncryptionToken
+      - ConsulACLDataCenter
+      - ConsulACLAgentToken
     # - Label:
     #     default: 'TLS Certificate Parameters'
     #   Parameters:
@@ -146,6 +148,13 @@ Parameters:
   EncryptionToken:
     NoEcho: true
     Description: 'Secret key to use for encryption of Consul network traffic. This key must be 16-bytes that are Base64-encoded'
+    Type: String
+  ConsulACLDataCenter:
+    Description: 'This designates the datacenter which is authoritative for ACL information.'
+    Type: String
+  ConsulACLAgentToken:
+    NoEcho: true
+    Description: 'Special token that is used for an agents internal operations. This token should be created before this template is run.'
     Type: String
   # CertificateS3Bucket:
   #   Description: 'Secure S3 Bucket which contains the required certificates'
@@ -425,7 +434,11 @@ Resources:
                   "ui" : false,
                   "disable_update_check": true,
                   "log_level": "warn",
-                  "encrypt": "${EncryptionToken}"
+                  "encrypt": "${EncryptionToken}",
+                  "acl_datacenter": "${ConsulACLDataCenter}",
+                  "acl_default_policy": "deny",
+                  "acl_down_policy": "extend-cache",
+                  "acl_agent_token": "${ConsulACLAgentToken}"
                 }
               mode: '000755'
               owner: root
