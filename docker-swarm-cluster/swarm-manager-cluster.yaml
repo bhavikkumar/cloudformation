@@ -864,9 +864,10 @@ Resources:
           files:
             /opt/vault/vault.hcl:
               content: !Sub |
-                backend "consul" {
+                ui = true
+                storage "consul" {
                   address = "127.0.0.1:8500"
-                  path = "vault"
+                  path = "vault/"
                   scheme="http"
                 }
                 listener "tcp" {
