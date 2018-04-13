@@ -24,6 +24,8 @@ Metadata:
         default: 'Consul Parameters'
       Parameters:
       - EncryptionToken
+      - ConsulACLDataCenter
+      - ConsulACLMasterToken
     # - Label:
     #     default: 'TLS Certificate Parameters'
     #   Parameters:
@@ -148,6 +150,13 @@ Parameters:
   EncryptionToken:
     NoEcho: true
     Description: 'Secret key to use for encryption of Consul network traffic. This key must be 16-bytes that are Base64-encoded'
+    Type: String
+  ConsulACLDataCenter:
+    Description: 'This designates the datacenter which is authoritative for ACL information.'
+    Type: String
+  ConsulACLMasterToken:
+    NoEcho: true
+    Description: 'Only used for servers in the acl_datacenter, allows operators to bootstrap the ACL system with a token that is well-known.'
     Type: String
   # CertificateS3Bucket:
   #   Description: 'Secure S3 Bucket which contains the required certificates'
@@ -774,7 +783,12 @@ Resources:
                   },
                   "disable_update_check": true,
                   "log_level": "warn",
-                  "encrypt": "${EncryptionToken}"
+                  "encrypt": "${EncryptionToken}",
+                  "acl_datacenter": "${ConsulACLDataCenter}",
+                  "acl_default_policy": "deny",
+                  "acl_down_policy": "extend-cache",
+                  "acl_master_token": "${ConsulACLMasterToken}",
+                  "acl_agent_token": "${ConsulACLMasterToken}"
                 }
               mode: '000755'
               owner: root
@@ -864,10 +878,12 @@ Resources:
           files:
             /opt/vault/vault.hcl:
               content: !Sub |
-                backend "consul" {
+                ui = true
+                storage "consul" {
                   address = "127.0.0.1:8500"
-                  path = "vault"
+                  path = "vault/"
                   scheme="http"
+                  token="${ConsulACLMasterToken}"
                 }
                 listener "tcp" {
                   address = "0.0.0.0:8200"
