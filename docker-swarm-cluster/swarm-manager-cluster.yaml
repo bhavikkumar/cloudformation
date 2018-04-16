@@ -11,7 +11,7 @@ Metadata:
       - ParentPublicZoneStack
       - ParentPrivateZoneStack
       - ParentAlertStack
-      - LogAggregatorDNS
+      - LogAggregatorStack
     - Label:
         default: 'Docker Swarm Manager Parameters'
       Parameters:
@@ -45,8 +45,8 @@ Parameters:
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
     Type: String
-  LogAggregatorDNS:
-    Description: 'The log aggregator DNS which was created using operations/fluentd-aggregator.yaml template'
+  LogAggregatorStack:
+    Description: 'The log aggregator stack which was created using operations/fluentd-aggregator.yaml template'
     Type: String
   KeyName:
     Description: Amazon EC2 Key Pair
@@ -694,7 +694,7 @@ Resources:
                 *.* @@localhost:5140
                 # ### end of the forwarding rule ###
             /etc/fluentd.conf:
-              content: !Sub |
+              content: |
                 <system>
                   log_level warn
                 </system>
@@ -725,7 +725,7 @@ Resources:
                   recover_wait 10s
                   hard_timeout 60s
                   <server>
-                    host ${LogAggregatorDNS}
+                    host {{LogAggregatorDNS}}
                     port 24224
                   </server>
                   <buffer>
@@ -735,6 +735,9 @@ Resources:
                     retry_wait 20s
                   </buffer>
                 </match>
+              context:
+                LogAggregatorDNS:
+                  'Fn::ImportValue': !Sub '${LogAggregatorStack}-LogAggregatorDNS'
           commands:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"

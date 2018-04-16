@@ -10,7 +10,7 @@ Metadata:
       - ParentVPCStack
       - ParentAlertStack
       - SwarmManagerStack
-      - LogAggregatorDNS
+      - LogAggregatorStack
     - Label:
         default: 'Docker Swarm Worker Parameters'
       Parameters:
@@ -45,8 +45,8 @@ Parameters:
   SwarmManagerStack:
     Description: 'The swarm manager stack which we will be joining the workers too.'
     Type: String
-  LogAggregatorDNS:
-    Description: 'The log aggregator DNS which was created using operations/fluentd-aggregator.yaml template'
+  LogAggregatorStack:
+    Description: 'The log aggregator stack which was created using operations/fluentd-aggregator.yaml template'
     Type: String
   DesiredWorkerClusterSize:
     Description: The desired number of swarm worker nodes
@@ -394,7 +394,7 @@ Resources:
                   recover_wait 10s
                   hard_timeout 60s
                   <server>
-                    host ${LogAggregatorDNS}
+                    host {{LogAggregatorDNS}}
                     port 24224
                   </server>
                   <buffer>
@@ -404,6 +404,9 @@ Resources:
                     retry_wait 20s
                   </buffer>
                 </match>
+              context:
+                LogAggregatorDNS:
+                  'Fn::ImportValue': !Sub '${LogAggregatorStack}-LogAggregatorDNS'
           commands:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
