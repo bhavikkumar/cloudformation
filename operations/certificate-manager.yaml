@@ -142,13 +142,6 @@ Resources:
   CertBotLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and create/renew a wildcard certificate
-      AWS::CloudFormation::Authentication:
-        CertificateAccessCreds:
-          type: "S3"
-          buckets:
-            - !Ref CertificateBucket
-          roleName:
-            Ref: CertificateManagerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
@@ -269,20 +262,6 @@ Resources:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
         existing_certificates:
-          files:
-            /tmp/letsencrypt.tar.gz:
-              source:
-                Fn::Join:
-                  - ""
-                  -
-                    - "https://"
-                    - Ref: "CertificateBucket"
-                    - ".s3.amazonaws.com"
-                    - "/letsencrypt.tar.gz"
-              mode: "000644"
-              owner: "root"
-              group: "root"
-              authentication: "CertificateAccessCreds"
           commands:
             a:
               command: "mkdir -p /etc/letsencrypt"
@@ -318,6 +297,10 @@ Resources:
             #!/bin/bash -xe
             yum update -y
             yum install -y aws-cfn-bootstrap
+            EXISTS=`aws s3 ls s3://certificatemanager-certificatebucket-qujypgk0wvbd/letsencrypt.tar.gz`
+            if [ ! -z "$EXISTS" ]; then
+              aws s3 cp s3://${CertificateBucket}/letsencrypt.tar.gz /tmp/letsencrypt.tar.gz
+            fi
             /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource CertBotLaunchConfiguration --configsets full_install --region ${AWS::Region}
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource CertBotAutoScaleGroup --region ${AWS::Region}
             MODIFY_COUNT=`find /etc/letsencrypt/ -type f -mmin -10 | wc -l`
