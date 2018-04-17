@@ -129,19 +129,7 @@ Resources:
       Roles:
         - !Ref CertificateManagerRole
 
-  CertificateAccessLogBucket:
-    Type: "AWS::S3::Bucket"
-    DeletionPolicy: Retain
-    Properties:
-      AccessControl: LogDeliveryWrite
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-
   CertificateBucket:
-    DependsOn:
-      - CertificateAccessLogBucket
     Type: "AWS::S3::Bucket"
     DeletionPolicy: Delete
     Properties:
@@ -150,8 +138,6 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
-      LoggingConfiguration:
-        DestinationBucketName: !Ref CertificateAccessLogBucket
 
   CertBotLaunchConfiguration:
     Metadata:
@@ -297,14 +283,14 @@ Resources:
               owner: "root"
               group: "root"
               authentication: "CertificateAccessCreds"
-          # commands:
-          #   docker_run:
-          #     command: "sudo docker run -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV -n --agree-tos --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
-          #     env:
-          #      LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "", "--test-cert" ] }
-          #      CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
-          #      EMAIL_ADDRESS: { "Ref": "EmailAddress"}
-          #     cwd: "~"
+          commands:
+            docker_run:
+              command: "sudo docker run -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV --cert-path /etc/letsencrypt/cert.pem --key-path /etc/letsencrypt/privkey.pem --fullchain-path /etc/letsencrypt/fullchain.pem --chain-path /etc/letsencrypt/chain.pem --keep-until-expiring -n --agree-tos --rsa-key-size 4096 --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
+              env:
+               LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "", "--test-cert" ] }
+               CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
+               EMAIL_ADDRESS: { "Ref": "EmailAddress"}
+              cwd: "~"
     DependsOn:
       - CertificateManagerInstanceProfile
     Type: AWS::AutoScaling::LaunchConfiguration
