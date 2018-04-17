@@ -92,6 +92,34 @@ Resources:
       Roles:
         - !Ref CertificateManagerRole
 
+  CertificateBucketPolicy:
+    DependsOn:
+      - CertificateManagerRole
+      - CertificateBucket
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "certificate-bucket-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+            Resource:
+            - !Join ["", ["arn:aws:s3:::", !Ref CertificateBucket ] ]
+          -
+            Effect: "Allow"
+            Action:
+              - s3:ListObjects
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+            - !Join ["", ["arn:aws:s3:::", !Ref CertificateBucket, "/*" ] ]
+      Roles:
+        - !Ref CertificateManagerRole
+
   CertificateManagerInstanceProfile:
     DependsOn:
       - CertificateManagerRole
@@ -101,25 +129,50 @@ Resources:
       Roles:
         - !Ref CertificateManagerRole
 
+  CertificateAccessLogBucket:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CertificateBucket:
+    DependsOn:
+      - CertificateAccessLogBucket
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: Delete
+    Properties:
+      AccessControl: Private
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LoggingConfiguration:
+        DestinationBucketName: !Ref CertificateAccessLogBucket
+
   CertBotLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and create/renew a wildcard certificate
-      # AWS::CloudFormation::Authentication:
-      #   rolebased:
-      #     type: "S3"
-      #     buckets:
-      #       - !Ref CertificateS3Bucket
-      #     roleName:
-      #       Ref: SwarmManagerRole
+      AWS::CloudFormation::Authentication:
+        CertificateAccessCreds:
+          type: "S3"
+          buckets:
+            - !Ref CertificateBucket
+          roleName:
+            Ref: CertificateManagerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
             - install_cfn
             - install_docker
             - setup_logging
-            - create_renew_certificates
+            - existing_certificates
           update_install:
             - install_cfn
+            - existing_certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -229,15 +282,29 @@ Resources:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
-        create_renew_certificates:
-          commands:
-            docker_run:
-              command: "sudo docker run -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV -n --agree-tos --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
-              env:
-               LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "", "--test-cert" ] }
-               CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
-               EMAIL_ADDRESS: { "Ref": "EmailAddress"}
-              cwd: "~"
+        existing_certificates:
+          files:
+            /etc/letsencrypt/test.txt:
+              source:
+                Fn::Join:
+                  - ""
+                  -
+                    - "https://"
+                    - Ref: "CertificateBucket"
+                    - ".s3.amazonaws.com"
+                    - "/test.txt"
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              authentication: "CertificateAccessCreds"
+          # commands:
+          #   docker_run:
+          #     command: "sudo docker run -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV -n --agree-tos --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
+          #     env:
+          #      LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "", "--test-cert" ] }
+          #      CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
+          #      EMAIL_ADDRESS: { "Ref": "EmailAddress"}
+          #     cwd: "~"
     DependsOn:
       - CertificateManagerInstanceProfile
     Type: AWS::AutoScaling::LaunchConfiguration
@@ -303,6 +370,11 @@ Resources:
           Value: certificate-manager
 
 Outputs:
+  CertificateBucket:
+    Description: The bucket which contains the certificates
+    Value: !Ref CertificateBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-CertificateBucket'
   CertificateManagerAsgNotificationTopic:
     Description: The ASG notification topic of managers being started or terminated.
     Value: !Ref CertificateManagerAsgNotification
