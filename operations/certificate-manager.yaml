@@ -131,7 +131,7 @@ Resources:
 
   CertificateBucket:
     Type: "AWS::S3::Bucket"
-    DeletionPolicy: Delete
+    DeletionPolicy: Retain
     Properties:
       AccessControl: Private
       BucketEncryption:
@@ -270,7 +270,7 @@ Resources:
               cwd: "~"
         existing_certificates:
           files:
-            /etc/letsencrypt/test.txt:
+            /tmp/letsencrypt.tar.gz:
               source:
                 Fn::Join:
                   - ""
@@ -278,14 +278,21 @@ Resources:
                     - "https://"
                     - Ref: "CertificateBucket"
                     - ".s3.amazonaws.com"
-                    - "/test.txt"
+                    - "/letsencrypt.tar.gz"
               mode: "000644"
               owner: "root"
               group: "root"
               authentication: "CertificateAccessCreds"
           commands:
-            docker_run:
-              command: "sudo docker run -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV --cert-path /etc/letsencrypt/cert.pem --key-path /etc/letsencrypt/privkey.pem --fullchain-path /etc/letsencrypt/fullchain.pem --chain-path /etc/letsencrypt/chain.pem --keep-until-expiring -n --agree-tos --rsa-key-size 4096 --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
+            a:
+              command: "mkdir -p /etc/letsencrypt"
+              cwd: "~"
+            b:
+              command: "tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/"
+              ignoreErrors: true
+              cwd: "~"
+            c:
+              command: "sudo docker run --log-driver=fluentd -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV --keep-until-expiring -n --agree-tos --rsa-key-size 4096 --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
               env:
                LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "", "--test-cert" ] }
                CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
@@ -313,6 +320,11 @@ Resources:
             yum install -y aws-cfn-bootstrap
             /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource CertBotLaunchConfiguration --configsets full_install --region ${AWS::Region}
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource CertBotAutoScaleGroup --region ${AWS::Region}
+            MODIFY_COUNT=`find /etc/letsencrypt/ -type f -mmin -10 | wc -l`
+            if [ $MODIFY_COUNT -gt "0" ]; then
+              tar -zcf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt .
+              aws s3 cp --sse /tmp/letsencrypt.tar.gz s3://${CertificateBucket}/
+            fi
 
   CertBotAutoScaleGroup:
     DependsOn:
