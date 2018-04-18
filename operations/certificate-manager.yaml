@@ -30,9 +30,6 @@ Parameters:
   LogAggregatorStack:
     Description: 'The log aggregator stack which was created using operations/fluentd-aggregator.yaml template'
     Type: String
-  KeyName:
-    Description: Amazon EC2 Key Pair
-    Type: "AWS::EC2::KeyPair::KeyName"
   LEEnvironment:
     Description: The lets encrypt environment which we will be running against
     Type: String
@@ -122,7 +119,8 @@ Resources:
 
   CertificateManagerInstanceProfile:
     DependsOn:
-      - CertificateManagerRole
+      - CertificateBucketPolicy
+      - CertificateBotPolicy
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
@@ -139,6 +137,14 @@ Resources:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
+  ACMCertificate:
+    Type: "AWS::CertificateManager::Certificate"
+    Properties:
+      DomainName:
+        'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
+      SubjectAlternativeNames:
+        - !Join [ '.', [ '*', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+
   CertBotLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and create/renew a wildcard certificate
@@ -148,10 +154,10 @@ Resources:
             - install_cfn
             - install_docker
             - setup_logging
-            - existing_certificates
+            - create_renew_certificates
           update_install:
             - install_cfn
-            - existing_certificates
+            - create_renew_certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -261,17 +267,10 @@ Resources:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
-        existing_certificates:
+        create_renew_certificates:
           commands:
-            a:
-              command: "mkdir -p /etc/letsencrypt"
-              cwd: "~"
-            b:
-              command: "tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/"
-              ignoreErrors: true
-              cwd: "~"
-            c:
-              command: "sudo docker run --log-driver=fluentd -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV --keep-until-expiring -n --agree-tos --rsa-key-size 4096 --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
+            run_certbot:
+              command: "sudo docker run --log-driver=fluentd --name certbot -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV --keep-until-expiring -n --agree-tos --rsa-key-size 4096 --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
               env:
                LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "", "--test-cert" ] }
                CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
@@ -279,6 +278,7 @@ Resources:
               cwd: "~"
     DependsOn:
       - CertificateManagerInstanceProfile
+      - CertificateBucket
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -290,24 +290,25 @@ Resources:
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, 't2.nano', Arch]]
       InstanceType: "t2.nano"
       IamInstanceProfile: !Ref CertificateManagerInstanceProfile
-      KeyName: !Ref KeyName
       UserData:
-        "Fn::Base64":
-          !Sub |
-            #!/bin/bash -xe
-            yum update -y
-            yum install -y aws-cfn-bootstrap
-            EXISTS=`aws s3 ls s3://certificatemanager-certificatebucket-qujypgk0wvbd/letsencrypt.tar.gz`
-            if [ ! -z "$EXISTS" ]; then
-              aws s3 cp s3://${CertificateBucket}/letsencrypt.tar.gz /tmp/letsencrypt.tar.gz
-            fi
-            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource CertBotLaunchConfiguration --configsets full_install --region ${AWS::Region}
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource CertBotAutoScaleGroup --region ${AWS::Region}
-            MODIFY_COUNT=`find /etc/letsencrypt/ -type f -mmin -10 | wc -l`
-            if [ $MODIFY_COUNT -gt "0" ]; then
-              tar -zcf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt .
-              aws s3 cp --sse /tmp/letsencrypt.tar.gz s3://${CertificateBucket}/
-            fi
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          # Check if the lets encrypt tarball exists, then we download and extract it.
+          mkdir -p /etc/letsencrypt
+          EXISTS=$(aws s3 ls s3://${CertificateBucket}/letsencrypt.tar.gz) || true
+          if [ ! -z "$EXISTS" ]; then
+            aws s3 cp s3://${CertificateBucket}/letsencrypt.tar.gz /tmp/letsencrypt.tar.gz
+            tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/
+          fi
+          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource CertBotLaunchConfiguration --configsets full_install --region ${AWS::Region}
+          # If the files were updated then we push the new certificates to the S3 bucket.
+          MODIFY_COUNT=$(find /etc/letsencrypt/ -type f -mmin -15 | wc -l)
+          if [ $MODIFY_COUNT -gt "0" ]; then
+            tar -zcf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt .
+            aws s3 cp /tmp/letsencrypt.tar.gz s3://${CertificateBucket}/ --sse
+          fi
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource CertBotAutoScaleGroup --region ${AWS::Region}
 
   CertBotAutoScaleGroup:
     DependsOn:
@@ -324,7 +325,7 @@ Resources:
         PauseTime: PT5M
         WaitOnResourceSignals: true
     Properties:
-      MinSize: 1
+      MinSize: 0
       MaxSize: 2
       DesiredCapacity: 1
       HealthCheckType: EC2
@@ -350,12 +351,33 @@ Resources:
           PropagateAtLaunch: true
           Value: certificate-manager
 
+  CertBotDailyRunSchedule:
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName:
+        Ref: CertBotAutoScaleGroup
+      DesiredCapacity: 1
+      Recurrence: "30 5 * * *"
+
+  CertBotDailyStopSchedule:
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName:
+        Ref: CertBotAutoScaleGroup
+      DesiredCapacity: 0
+      Recurrence: "45 5 * * *"
+
 Outputs:
   CertificateBucket:
     Description: The bucket which contains the certificates
     Value: !Ref CertificateBucket
     Export:
       Name: !Sub '${AWS::StackName}-CertificateBucket'
+  ACMCertificate:
+    Description: The ARN of the certificate created in ACM.
+    Value: !Ref ACMCertificate
+    Export:
+      Name: !Sub '${AWS::StackName}-CertificateArn'
   CertificateManagerAsgNotificationTopic:
     Description: The ASG notification topic of managers being started or terminated.
     Value: !Ref CertificateManagerAsgNotification
