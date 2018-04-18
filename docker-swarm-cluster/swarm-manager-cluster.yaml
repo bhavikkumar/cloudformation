@@ -12,6 +12,7 @@ Metadata:
       - ParentPrivateZoneStack
       - ParentAlertStack
       - LogAggregatorStack
+      - CertificateStack
     - Label:
         default: 'Docker Swarm Manager Parameters'
       Parameters:
@@ -47,6 +48,9 @@ Parameters:
     Type: String
   LogAggregatorStack:
     Description: 'The log aggregator stack which was created using operations/fluentd-aggregator.yaml template'
+    Type: String
+  CertificateStack:
+    Description: 'The certificate stack which was created using operations/certificate-manager.yaml template'
     Type: String
   KeyName:
     Description: Amazon EC2 Key Pair
@@ -439,22 +443,31 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
-  # CertificateBucketPolicy:
-  #   DependsOn:
-  #     - SwarmManagerRole
-  #   Type: AWS::IAM::Policy
-  #   Properties:
-  #     PolicyName: "swarm-manager-certificate-download-policy"
-  #     PolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         -
-  #           Effect: "Allow"
-  #           Action:
-  #             - "s3:GetObject"
-  #           Resource: !Sub 'arn:aws:s3:::${CertificateS3Bucket}/*'
-  #     Roles:
-  #       - !Ref SwarmManagerRole
+  CertificateBucketPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "certificate-download-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+            Resource:
+            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
+          -
+            Effect: "Allow"
+            Action:
+              - s3:ListObjects
+              - "s3:GetObject"
+            Resource:
+            - !Join ["", [ 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*" ] ]
+
+      Roles:
+        - !Ref SwarmManagerRole
 
   SwarmLifecycleQueue:
     Type: AWS::SQS::Queue
@@ -539,7 +552,7 @@ Resources:
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /v1/sys/health
       HealthCheckPort: 8200
-      HealthCheckProtocol: HTTP
+      HealthCheckProtocol: HTTPS
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
       Matcher:
@@ -547,7 +560,7 @@ Resources:
       Name: !Join ['-', [ !Ref "AWS::StackName", Vault ] ]
       # This port should only be available internally.
       Port: 8200
-      Protocol: HTTP
+      Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
@@ -558,7 +571,7 @@ Resources:
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /v1/sys/health
       HealthCheckPort: 8200
-      HealthCheckProtocol: HTTP
+      HealthCheckProtocol: HTTPS
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
       Matcher:
@@ -566,7 +579,7 @@ Resources:
       Name: !Join ['-', [ !Ref "AWS::StackName", VaultCluster ] ]
       # This port should only be available internally.
       Port: 8201
-      Protocol: HTTP
+      Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
@@ -610,13 +623,13 @@ Resources:
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
-      # AWS::CloudFormation::Authentication:
-      #   rolebased:
-      #     type: "S3"
-      #     buckets:
-      #       - !Ref CertificateS3Bucket
-      #     roleName:
-      #       Ref: SwarmManagerRole
+      AWS::CloudFormation::Authentication:
+        CertificateAccessCreds:
+          type: "S3"
+          buckets:
+            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+          roleName:
+            Ref: SwarmManagerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
@@ -626,13 +639,12 @@ Resources:
             - init_aws_swarm
             - swarm_node_healthcheck
             - guide_aws_swarm
-            # - certificates
+            - certificates
             - consul
             - vault
             - haproxy
           update_install:
             - install_cfn
-            # - certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -741,6 +753,34 @@ Resources:
           commands:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
+              cwd: "~"
+        certificates:
+          files:
+            /tmp/letsencrypt.tar.gz:
+              source:
+                Fn::Join:
+                  - ""
+                  -
+                    - "https://"
+                    - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+                    - ".s3.amazonaws.com"
+                    - "/letsencrypt.tar.gz"
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              authentication: "CertificateAccessCreds"
+          commands:
+            create_directory:
+              command: "mkdir -p /etc/letsencrypt"
+              cwd: "~"
+            extract_certificates:
+              command: "tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/"
+              cwd: "~"
+            fix_permissions_live:
+              command: "chmod 755 /etc/letsencrypt/live"
+              cwd: "~"
+            fix_permissions_archive:
+              command: "chmod 755 /etc/letsencrypt/archive"
               cwd: "~"
         init_aws_swarm:
           commands:
@@ -890,8 +930,12 @@ Resources:
                 }
                 listener "tcp" {
                   address = "0.0.0.0:8200"
-                  tls_disable = 1
+                  tls_cert_file = "/certs/live/{{DOMAIN}}/fullchain.pem"
+                  tls_key_file = "/certs/live/{{DOMAIN}}/privkey.pem"
                 }
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -899,21 +943,15 @@ Resources:
             config_file_permission:
               command: "chmod 644 /opt/vault/vault.hcl"
             docker_run:
-              command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e 'VAULT_REDIRECT_INTERFACE=eth0' -e VAULT_CLUSTER_ADDR=$VAULT_CLUSTER_ADDR -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
+              command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e VAULT_API_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -e VAULT_CLUSTER_ADDR=$VAULT_CLUSTER_ADDR -v /etc/letsencrypt:/certs:ro -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
               env:
-                VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
+                VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "https://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
               cwd: "~"
             init_vault:
-              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' bhavikk/init-vault:latest"
+              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=https' -e 'VAULT_SKIP_VERIFY=true' bhavikk/init-vault:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
-        # certificates:
-        #   sources:
-        #     /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
-        #   commands:
-        #     config_file_permission:
-        #       command: "chmod 400 /opt/certificates/*"
         haproxy:
           files:
             /opt/haproxy/compose.yaml:
@@ -1114,7 +1152,11 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8200
-      Protocol: HTTP
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
   VaultClusterHttpListener:
     DependsOn:
@@ -1127,7 +1169,11 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8201
-      Protocol: HTTP
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
   HAProxyHttpClusterListener:
     DependsOn:
