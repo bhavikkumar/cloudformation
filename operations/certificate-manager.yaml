@@ -373,6 +373,11 @@ Outputs:
     Value: !Ref CertificateBucket
     Export:
       Name: !Sub '${AWS::StackName}-CertificateBucket'
+  CertificateBucketArn:
+    Description: The bucket arn which contains the certificates
+    Value: !GetAtt CertificateBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CertificateBucketArn'
   ACMCertificate:
     Description: The ARN of the certificate created in ACM.
     Value: !Ref ACMCertificate
