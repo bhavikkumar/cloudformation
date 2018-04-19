@@ -545,7 +545,6 @@ Resources:
       Matcher:
         HttpCode: '200'
       Name: !Join ['-', [ !Ref "AWS::StackName", ConsulCluster ] ]
-      # This port should only be available internally.
       Port: 8500
       Protocol: HTTP
       UnhealthyThresholdCount: 4
@@ -564,7 +563,24 @@ Resources:
       Matcher:
         HttpCode: '200,429'
       Name: !Join ['-', [ !Ref "AWS::StackName", Vault ] ]
-      # This port should only be available internally.
+      Port: 8200
+      Protocol: HTTPS
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
+
+  VaultExternalTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /v1/sys/health
+      HealthCheckPort: 8200
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200,429'
+      Name: !Join ['-', [ !Ref "AWS::StackName", VaultExternal ] ]
       Port: 8200
       Protocol: HTTPS
       UnhealthyThresholdCount: 4
@@ -1076,6 +1092,7 @@ Resources:
         - !Ref SwarmHealthCheckTargetGroup
         - !Ref ConsulTargetGroup
         - !Ref VaultTargetGroup
+        - !Ref VaultExternalTargetGroup
         - !Ref VaultClusterTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
@@ -1166,12 +1183,12 @@ Resources:
 
   VaultExternalHttpListener:
     DependsOn:
-      - VaultTargetGroup
+      - VaultExternalTargetGroup
       - ExternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
-      - TargetGroupArn: !Ref VaultTargetGroup
+      - TargetGroupArn: !Ref VaultExternalTargetGroup
         Type: forward
       LoadBalancerArn: !Ref ExternalLoadBalancer
       Port: 8200
