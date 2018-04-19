@@ -948,7 +948,7 @@ Resources:
                 VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "https://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
               cwd: "~"
             init_vault:
-              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=https' -e 'VAULT_SKIP_VERIFY=true' bhavikk/init-vault:latest"
+              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e VAULT_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -e VAULT_SKIP_VERIFY=true bhavikk/init-vault:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
