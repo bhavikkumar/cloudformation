@@ -337,6 +337,12 @@ Resources:
         FromPort: '80'
         ToPort: '80'
         CidrIp: 0.0.0.0/0
+        Description: 'Public API Traffic'
+      - IpProtocol: tcp
+        FromPort: '8200'
+        ToPort: '8200'
+        CidrIp: 0.0.0.0/0
+        Description: 'Public Vault UI Traffic'
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -1158,6 +1164,23 @@ Resources:
           'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
       SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
+  VaultExternalHttpListener:
+    DependsOn:
+      - VaultTargetGroup
+      - ExternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref VaultTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 8200
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
+
   VaultClusterHttpListener:
     DependsOn:
       - VaultClusterTargetGroup
@@ -1200,6 +1223,19 @@ Resources:
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 1936
       Protocol: HTTP
+
+  VaultPublicDNS:
+    DependsOn:
+      - ExternalLoadBalancer
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt ExternalLoadBalancer.DNSName
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
 
   VaultPrivateDNS:
     DependsOn:
