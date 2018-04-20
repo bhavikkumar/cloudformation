@@ -342,7 +342,12 @@ Resources:
         FromPort: '8200'
         ToPort: '8200'
         CidrIp: 0.0.0.0/0
-        Description: 'Public Vault UI Traffic'
+        Description: 'Public Vault Traffic'
+      - IpProtocol: tcp
+        FromPort: '8500'
+        ToPort: '8500'
+        CidrIp: 0.0.0.0/0
+        Description: 'Public Consul Traffic'
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -525,7 +530,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '204'
-      Name: !Join ['-', [ !Ref "AWS::StackName", NodeHealthCheck ] ]
       # This port should only be available internally.
       Port: 44444
       Protocol: HTTP
@@ -539,14 +543,30 @@ Resources:
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /v1/health/service/consul
       HealthCheckPort: 8500
-      HealthCheckProtocol: HTTP
+      HealthCheckProtocol: HTTPS
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Join ['-', [ !Ref "AWS::StackName", ConsulCluster ] ]
       Port: 8500
-      Protocol: HTTP
+      Protocol: HTTPS
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
+
+  ConsulExternalTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /v1/health/service/consul
+      HealthCheckPort: 8500
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Port: 8500
+      Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
@@ -562,7 +582,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200,429'
-      Name: !Join ['-', [ !Ref "AWS::StackName", Vault ] ]
       Port: 8200
       Protocol: HTTPS
       UnhealthyThresholdCount: 4
@@ -580,7 +599,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200,429'
-      Name: !Join ['-', [ !Ref "AWS::StackName", VaultExternal ] ]
       Port: 8200
       Protocol: HTTPS
       UnhealthyThresholdCount: 4
@@ -598,7 +616,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200,429'
-      Name: !Join ['-', [ !Ref "AWS::StackName", VaultCluster ] ]
       # This port should only be available internally.
       Port: 8201
       Protocol: HTTPS
@@ -617,7 +634,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Join ['-', [ !Ref "AWS::StackName", HAProxyCluster ] ]
       Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 4
@@ -635,7 +651,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Join ['-', [ !Ref "AWS::StackName", HAProxyStatsCluster ] ]
       Port: 1936
       Protocol: HTTP
       UnhealthyThresholdCount: 4
@@ -829,16 +844,24 @@ Resources:
             /opt/consul/config.json:
               content: !Sub |
                 {
-                  "advertise_addr" : "{{ GetInterfaceIP \"eth0\" }}",
-                  "bind_addr": "{{ GetInterfaceIP \"eth0\" }}",
+                  "advertise_addr" : "{{{ADVERTISE_ADRR}}}",
+                  "bind_addr": "{{{BIND_ADRR}}}",
                   "client_addr": "0.0.0.0",
+                  "cert_file": "/certs/live/{{DOMAIN}}/cert.pem",
+                  "key_file": "/certs/live/{{DOMAIN}}/privkey.pem",
+                  "ca_file": "/certs/live/{{DOMAIN}}/chain.pem",
+                  "verify_outgoing": true,
+                  "ports" : {
+                    "http": -1,
+                    "https": 8500
+                  },
                   "data_dir": "/consul/data",
                   "datacenter": "${AWS::Region}",
                   "leave_on_terminate" : true,
                   "retry_join" : [
-                    "consul.server"
+                    "consulserver.{{DOMAIN}}"
                   ],
-                  "server_name" : "server.${AWS::Region}.consul",
+                  "domain": "{{DOMAIN}}",
                   "skip_leave_on_interrupt" : true,
                   "bootstrap_expect": ${ManagerClusterSize},
                   "server" : true,
@@ -855,6 +878,11 @@ Resources:
                   "acl_master_token": "${ConsulACLMasterToken}",
                   "acl_agent_token": "${ConsulACLMasterToken}"
                 }
+              context:
+                ADVERTISE_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
+                BIND_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -873,14 +901,22 @@ Resources:
                     networks:
                       default_net:
                         aliases:
-                          - consul.server
+                          - consulserver.{{DOMAIN}}
                     command: "consul agent -config-file /consul/config/config.json"
                     ports:
                       - target: 8500
                         published: 8500
                         mode: host
+                      - target: 8600
+                        published: 8600
+                        mode: host
+                      - target: 8600
+                        published: 8600
+                        protocol: udp
+                        mode: host
                     volumes:
                       - /opt/consul:/consul/config
+                      - /etc/letsencrypt:/certs:ro
                     deploy:
                       mode: global
                       endpoint_mode: dnsrr
@@ -902,14 +938,18 @@ Resources:
                     networks:
                       default_net:
                         aliases:
-                          - consul.server
+                          - consulserver.{{DOMAIN}}
                     command: "consul agent -config-file /consul/config/config.json"
                     ports:
                       - target: 8500
                         published: 8500
                         mode: host
+                      - target: 8600
+                        published: 8600
+                        mode: host
                     volumes:
                       - /opt/consul:/consul/config
+                      - /etc/letsencrypt:/certs:ro
                     deploy:
                       mode: global
                       endpoint_mode: dnsrr
@@ -924,6 +964,9 @@ Resources:
                       placement:
                         constraints:
                           - node.role == worker
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -947,7 +990,8 @@ Resources:
                 storage "consul" {
                   address = "127.0.0.1:8500"
                   path = "vault/"
-                  scheme="http"
+                  scheme="https"
+                  tls_skip_verify="true"
                   token="${ConsulACLMasterToken}"
                 }
                 listener "tcp" {
@@ -992,7 +1036,7 @@ Resources:
                       default_net:
                         aliases:
                           - haproxy.server
-                    command: "-config=/tmp/haproxy.json -consul-addr=consul.server:8500"
+                    command: "-config=/tmp/haproxy.json -consul-addr=consulserver.{{DOMAIN}}:8500"
                     ports:
                       - target: 80
                         published: 80
@@ -1016,6 +1060,9 @@ Resources:
                       placement:
                         constraints:
                           - node.role == worker
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -1066,6 +1113,7 @@ Resources:
       - SwarmManagerLaunchConfiguration
       - SwarmHealthCheckTargetGroup
       - ConsulTargetGroup
+      - ConsulExternalTargetGroup
       - VaultTargetGroup
       - VaultClusterTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -1091,6 +1139,7 @@ Resources:
       TargetGroupARNs:
         - !Ref SwarmHealthCheckTargetGroup
         - !Ref ConsulTargetGroup
+        - !Ref ConsulExternalTargetGroup
         - !Ref VaultTargetGroup
         - !Ref VaultExternalTargetGroup
         - !Ref VaultClusterTargetGroup
@@ -1162,7 +1211,28 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8500
-      Protocol: HTTP
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
+
+  ConsulUiExternalHttpListener:
+    DependsOn:
+      - ConsulExternalTargetGroup
+      - ExternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref ConsulExternalTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 8500
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
   VaultHttpListener:
     DependsOn:
@@ -1241,6 +1311,19 @@ Resources:
       Port: 1936
       Protocol: HTTP
 
+  ConsulPublicDNS:
+    DependsOn:
+      - ExternalLoadBalancer
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      Name: !Join [ '.', [ 'consul', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt ExternalLoadBalancer.DNSName
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
+
   VaultPublicDNS:
     DependsOn:
       - ExternalLoadBalancer
@@ -1267,7 +1350,7 @@ Resources:
       HostedZoneId:
         'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-HostedZoneId'
 
-  APIDNS:
+  APIPublicDNS:
     DependsOn:
       - ExternalLoadBalancer
     Type: 'AWS::Route53::RecordSet'
