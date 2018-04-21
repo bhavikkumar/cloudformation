@@ -232,11 +232,6 @@ Resources:
         ToPort: '8200'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
-      - IpProtocol: tcp
-        FromPort: '8201'
-        ToPort: '8201'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   HAProxySecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -284,11 +279,6 @@ Resources:
       - IpProtocol: tcp
         FromPort: '8200'
         ToPort: '8200'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
-      - IpProtocol: tcp
-        FromPort: '8201'
-        ToPort: '8201'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
@@ -576,24 +566,6 @@ Resources:
       Matcher:
         HttpCode: '200,429'
       Port: 8200
-      Protocol: HTTPS
-      UnhealthyThresholdCount: 4
-      VpcId:
-        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
-
-  VaultClusterTargetGroup:
-    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
-    Properties:
-      HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /v1/sys/health
-      HealthCheckPort: 8200
-      HealthCheckProtocol: HTTPS
-      HealthCheckTimeoutSeconds: 8
-      HealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200,429'
-      # This port should only be available internally.
-      Port: 8201
       Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
@@ -988,8 +960,6 @@ Resources:
               command: "chmod 644 /opt/vault/vault.hcl"
             docker_run:
               command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e VAULT_API_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -v /etc/letsencrypt:/certs:ro -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
-              env:
-                VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "https://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
               cwd: "~"
             init_vault:
               command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e VAULT_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -e VAULT_SKIP_VERIFY=true bhavikk/init-vault:latest"
@@ -1093,7 +1063,6 @@ Resources:
       - ConsulTargetGroup
       - ConsulExternalTargetGroup
       - VaultTargetGroup
-      - VaultClusterTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -1120,7 +1089,6 @@ Resources:
         - !Ref ConsulExternalTargetGroup
         - !Ref VaultTargetGroup
         - !Ref VaultExternalTargetGroup
-        - !Ref VaultClusterTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
@@ -1240,23 +1208,6 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref ExternalLoadBalancer
       Port: 8200
-      Protocol: HTTPS
-      Certificates:
-      - CertificateArn:
-          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
-      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
-
-  VaultClusterHttpListener:
-    DependsOn:
-      - VaultClusterTargetGroup
-      - InternalLoadBalancer
-    Type: 'AWS::ElasticLoadBalancingV2::Listener'
-    Properties:
-      DefaultActions:
-      - TargetGroupArn: !Ref VaultClusterTargetGroup
-        Type: forward
-      LoadBalancerArn: !Ref InternalLoadBalancer
-      Port: 8201
       Protocol: HTTPS
       Certificates:
       - CertificateArn:
