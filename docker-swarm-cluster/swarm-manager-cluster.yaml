@@ -964,11 +964,13 @@ Resources:
               content: !Sub |
                 ui = true
                 storage "consul" {
-                  address = "127.0.0.1:8500"
+                  address = "consul-server.{{DOMAIN}}:8500"
                   path = "vault/"
                   scheme="https"
-                  tls_skip_verify="true"
                   token="${ConsulACLMasterToken}"
+                  tls_cert_file = "/certs/live/{{DOMAIN}}/cert.pem"
+                  tls_key_file = "/certs/live/{{DOMAIN}}/privkey.pem"
+                  tls_ca_file = "/certs/live/{{DOMAIN}}/chain.pem"
                 }
                 listener "tcp" {
                   address = "0.0.0.0:8200"
@@ -1051,6 +1053,7 @@ Resources:
               cwd: "~"
               ignoreErrors: true
     DependsOn:
+      - PrivateDNS
       - SwarmDynamoDBTable
       - VaultDynamoDBTable
       - SwarmManagerInstanceProfile
@@ -1328,6 +1331,11 @@ Resources:
         AliasTarget:
           HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
           DNSName: !GetAtt InternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'consul-server', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+        Type: A
+        TTL: 300
+        ResourceRecords:
+        - 127.0.0.1
       - Name: !Join [ '.', [ 'consul-agent', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
         Type: A
         TTL: 300
