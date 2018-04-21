@@ -8,9 +8,11 @@ Metadata:
         default: 'Parent Stacks'
       Parameters:
       - ParentVPCStack
+      - ParentPublicZoneStack
       - ParentAlertStack
       - SwarmManagerStack
       - LogAggregatorStack
+      - CertificateStack
     - Label:
         default: 'Docker Swarm Worker Parameters'
       Parameters:
@@ -25,11 +27,6 @@ Metadata:
       - EncryptionToken
       - ConsulACLDataCenter
       - ConsulACLAgentToken
-    # - Label:
-    #     default: 'TLS Certificate Parameters'
-    #   Parameters:
-    #   - CertificateS3Bucket
-    #   - CertificateFileName
     - Label:
         default: 'HA Proxy Parameters'
       Parameters:
@@ -39,6 +36,9 @@ Parameters:
   ParentVPCStack:
     Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
     Type: String
+  ParentPublicZoneStack:
+    Description: 'Stack name of parent Hosted Zone stack based on dns/*-hosted-zone.yaml template.'
+    Type: String    
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
     Type: String
@@ -47,6 +47,9 @@ Parameters:
     Type: String
   LogAggregatorStack:
     Description: 'The log aggregator stack which was created using operations/fluentd-aggregator.yaml template'
+    Type: String
+  CertificateStack:
+    Description: 'The certificate stack which was created using operations/certificate-manager.yaml template'
     Type: String
   DesiredWorkerClusterSize:
     Description: The desired number of swarm worker nodes
@@ -207,8 +210,7 @@ Resources:
             Action:
               - "dynamodb:GetItem"
             Resource:
-              Fn::ImportValue:
-                !Sub "${SwarmManagerStack}-SwarmTableArn"
+            - 'Fn::ImportValue': !Sub "${SwarmManagerStack}-SwarmTableArn"
       Roles:
         - !Ref SwarmWorkerRole
 
@@ -231,22 +233,31 @@ Resources:
       Roles:
         - !Ref SwarmWorkerRole
 
-  # CertificateBucketPolicy:
-  #   DependsOn:
-  #     - SwarmWorkerRole
-  #   Type: AWS::IAM::Policy
-  #   Properties:
-  #     PolicyName: "swarm-worker-certificate-download-policy"
-  #     PolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         -
-  #           Effect: "Allow"
-  #           Action:
-  #             - "s3:GetObject"
-  #           Resource: !Sub 'arn:aws:s3:::${CertificateS3Bucket}/*'
-  #     Roles:
-  #       - !Ref SwarmWorkerRole
+  CertificateBucketPolicy:
+    DependsOn:
+      - SwarmWorkerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "certificate-download-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+            Resource:
+            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
+          -
+            Effect: "Allow"
+            Action:
+              - s3:ListObjects
+              - "s3:GetObject"
+            Resource:
+            - !Join ["", [ 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*" ] ]
+
+      Roles:
+        - !Ref SwarmWorkerRole
 
   SwarmLifecycleQueuePolicy:
     DependsOn:
@@ -281,27 +292,26 @@ Resources:
   SwarmWorkerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
-      # AWS::CloudFormation::Authentication:
-      #   rolebased:
-      #     type: "S3"
-      #     buckets:
-      #       - !Ref CertificateS3Bucket
-      #     roleName:
-      #       Ref: SwarmWorkerRole
+      AWS::CloudFormation::Authentication:
+        CertificateAccessCreds:
+          type: "S3"
+          buckets:
+            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+          roleName:
+            Ref: SwarmWorkerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
             - install_cfn
             - install_docker
             - setup_logging
-            # - certificates
+            - certificates
             - consul_config
             - haproxy_config
             - init_aws_swarm
             - swarm_node_healthcheck
           update_install:
             - install_cfn
-            # - certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -411,27 +421,57 @@ Resources:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
-        # certificates:
-        #   sources:
-        #     /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
-        #   commands:
-        #     config_file_permission:
-        #       command: "chmod 400 /opt/certificates/*"
+        certificates:
+          files:
+            /tmp/letsencrypt.tar.gz:
+              source:
+                Fn::Join:
+                  - ""
+                  -
+                    - "https://"
+                    - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+                    - ".s3.amazonaws.com"
+                    - "/letsencrypt.tar.gz"
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              authentication: "CertificateAccessCreds"
+          commands:
+            create_directory:
+              command: "mkdir -p /etc/letsencrypt"
+              cwd: "~"
+            extract_certificates:
+              command: "tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/"
+              cwd: "~"
+            fix_permissions_live:
+              command: "chmod 755 /etc/letsencrypt/live"
+              cwd: "~"
+            fix_permissions_archive:
+              command: "chmod 755 /etc/letsencrypt/archive"
+              cwd: "~"
         consul_config:
           files:
             /opt/consul/config.json:
               content: !Sub |
                 {
-                  "advertise_addr" : "{{ GetInterfaceIP \"eth0\" }}",
-                  "bind_addr": "{{ GetInterfaceIP \"eth0\" }}",
+                  "advertise_addr" : "{{{ADVERTISE_ADRR}}}",
+                  "bind_addr": "{{{BIND_ADRR}}}",
                   "client_addr": "0.0.0.0",
+                  "cert_file": "/certs/live/{{DOMAIN}}/cert.pem",
+                  "key_file": "/certs/live/{{DOMAIN}}/privkey.pem",
+                  "ca_file": "/certs/live/{{DOMAIN}}/chain.pem",
+                  "verify_outgoing": true,
+                  "ports" : {
+                    "http": -1,
+                    "https": 8500
+                  },
                   "data_dir": "/consul/data",
                   "datacenter": "${AWS::Region}",
                   "leave_on_terminate" : true,
                   "retry_join" : [
-                    "consul.server"
+                    "consulserver.{{DOMAIN}}"
                   ],
-                  "server_name" : "agent.${AWS::Region}.consul",
+                  "domain": "{{DOMAIN}}",
                   "skip_leave_on_interrupt" : false,
                   "server" : false,
                   "ui" : false,
@@ -443,6 +483,11 @@ Resources:
                   "acl_down_policy": "extend-cache",
                   "acl_agent_token": "${ConsulACLAgentToken}"
                 }
+              context:
+                ADVERTISE_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
+                BIND_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
