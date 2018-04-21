@@ -272,7 +272,7 @@ Resources:
             run_certbot:
               command: "sudo docker run --log-driver=fluentd --name certbot -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV --keep-until-expiring -n --agree-tos --rsa-key-size 4096 --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
               env:
-               LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "", "--test-cert" ] }
+               LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "--server https://acme-v02.api.letsencrypt.org/directory", "--test-cert" ] }
                CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
                EMAIL_ADDRESS: { "Ref": "EmailAddress"}
               cwd: "~"
@@ -326,7 +326,7 @@ Resources:
         WaitOnResourceSignals: true
     Properties:
       MinSize: 0
-      MaxSize: 2
+      MaxSize: 1
       DesiredCapacity: 1
       HealthCheckType: EC2
       HealthCheckGracePeriod: 300
