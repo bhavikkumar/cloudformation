@@ -1311,57 +1311,54 @@ Resources:
       Port: 1936
       Protocol: HTTP
 
-  ConsulPublicDNS:
+  PublicDNS:
     DependsOn:
       - ExternalLoadBalancer
-    Type: 'AWS::Route53::RecordSet'
+    Type: 'AWS::Route53::RecordSetGroup'
     Properties:
-      Name: !Join [ '.', [ 'consul', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
-      Type: A
-      AliasTarget:
-        HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
-        DNSName: !GetAtt ExternalLoadBalancer.DNSName
       HostedZoneId:
         'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
+      RecordSets:
+      - Name: !Join [ '.', [ 'consul', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ExternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ExternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'api', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ExternalLoadBalancer.DNSName
 
-  VaultPublicDNS:
-    DependsOn:
-      - ExternalLoadBalancer
-    Type: 'AWS::Route53::RecordSet'
-    Properties:
-      Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
-      Type: A
-      AliasTarget:
-        HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
-        DNSName: !GetAtt ExternalLoadBalancer.DNSName
-      HostedZoneId:
-        'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
 
-  VaultPrivateDNS:
+  PrivateDNS:
     DependsOn:
       - InternalLoadBalancer
-    Type: 'AWS::Route53::RecordSet'
+    Type: 'AWS::Route53::RecordSetGroup'
     Properties:
-      Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
-      Type: A
-      AliasTarget:
-        HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
-        DNSName: !GetAtt InternalLoadBalancer.DNSName
       HostedZoneId:
         'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-HostedZoneId'
-
-  APIPublicDNS:
-    DependsOn:
-      - ExternalLoadBalancer
-    Type: 'AWS::Route53::RecordSet'
-    Properties:
-      Name: !Join [ '.', [ 'api', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
-      Type: A
-      AliasTarget:
-        HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
-        DNSName: !GetAtt ExternalLoadBalancer.DNSName
-      HostedZoneId:
-        'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
+      RecordSets:
+      - Name: !Join [ '.', [ 'consul', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt InternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt InternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'consul-agent', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+        Type: A
+        TTL: 300
+        ResourceRecords:
+        - 172.18.0.1
 
   SwarmManagerLifecycleHook:
     DependsOn:
