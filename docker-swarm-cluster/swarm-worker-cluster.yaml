@@ -601,8 +601,6 @@ Resources:
       SecurityGroups:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmClusterSecurityGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxySecurityGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsSecurityGroup'
       UserData:
