@@ -27,11 +27,6 @@ Metadata:
       - EncryptionToken
       - ConsulACLDataCenter
       - ConsulACLMasterToken
-    # - Label:
-    #     default: 'TLS Certificate Parameters'
-    #   Parameters:
-    #   - CertificateS3Bucket
-    #   - CertificateFileName
 
 Parameters:
   ParentVPCStack:
@@ -162,12 +157,6 @@ Parameters:
     NoEcho: true
     Description: 'Only used for servers in the acl_datacenter, allows operators to bootstrap the ACL system with a token that is well-known.'
     Type: String
-  # CertificateS3Bucket:
-  #   Description: 'Secure S3 Bucket which contains the required certificates'
-  #   Type: String
-  # CertificateFileName:
-  #   Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
-  #   Type: String
 
 Conditions:
   HasKeyName: !Not [!Equals [!Ref KeyName, '']]
@@ -179,19 +168,6 @@ Resources:
     Properties:
       DisplayName: 'Manager ASG Notifications'
       TopicName: 'SwarmManagerNotifications'
-
-  SwarmManagerSSHSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow SSH to the Docker Swarm Managers
-      VpcId:
-        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
-      SecurityGroupIngress:
-      # Port 22 is temporary, we will never need it in the future.
-      - IpProtocol: tcp
-        FromPort: '22'
-        ToPort: '22'
-        CidrIp: 0.0.0.0/0
 
   SwarmClusterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -1074,7 +1050,6 @@ Resources:
               cwd: "~"
               ignoreErrors: true
     DependsOn:
-      - SwarmManagerSSHSecurityGroup
       - SwarmDynamoDBTable
       - VaultDynamoDBTable
       - SwarmManagerInstanceProfile
@@ -1094,7 +1069,6 @@ Resources:
       IamInstanceProfile: !Ref SwarmManagerInstanceProfile
       KeyName: !Ref KeyName
       SecurityGroups:
-        - !Ref SwarmManagerSSHSecurityGroup
         - !Ref SwarmClusterSecurityGroup
         - !Ref ConsulClusterSecurityGroup
         - !Ref VaultClusterSecurityGroup
@@ -1335,7 +1309,6 @@ Resources:
           HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
           DNSName: !GetAtt ExternalLoadBalancer.DNSName
 
-
   PrivateDNS:
     DependsOn:
       - InternalLoadBalancer
@@ -1512,9 +1485,6 @@ Resources:
         Value: !GetAtt ExternalLoadBalancer.LoadBalancerFullName
 
 Outputs:
-  ManagerSecurityGroupID:
-    Description: SecurityGroup ID of the Swarm Manager
-    Value: !Ref SwarmManagerSSHSecurityGroup
   ManagerAsgNotificationTopic:
     Description: The ASG notification topic of managers being started or terminated.
     Value: !Ref SwarmManagerAsgNotification
