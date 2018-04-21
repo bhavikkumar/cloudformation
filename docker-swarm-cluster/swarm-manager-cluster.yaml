@@ -987,7 +987,7 @@ Resources:
             config_file_permission:
               command: "chmod 644 /opt/vault/vault.hcl"
             docker_run:
-              command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e VAULT_API_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -e VAULT_CLUSTER_ADDR=$VAULT_CLUSTER_ADDR -v /etc/letsencrypt:/certs:ro -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
+              command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e VAULT_API_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -v /etc/letsencrypt:/certs:ro -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
               env:
                 VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "https://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
               cwd: "~"
