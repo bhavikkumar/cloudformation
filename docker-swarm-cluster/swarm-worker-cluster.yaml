@@ -497,12 +497,26 @@ Resources:
         haproxy_config:
           files:
             /opt/haproxy/haproxy.json:
-              content:
+              content: !Sub |
+                consul {
+                  address = "consul-agent.{{DOMAIN}}:8500"
+                  token = "${ConsulACLAgentToken}"
+
+                  ssl {
+                    enabled = true
+                    cert = "/certs/live/{{DOMAIN}}/cert.pem"
+                    key  = "/certs/live/{{DOMAIN}}/privkey.pem"
+                    ca_cert = "/certs/live/{{DOMAIN}}/chain.pem"
+                  }
+                }
                 template {
                   source = "/tmp/haproxy.ctmpl"
                   destination = "/etc/haproxy/haproxy.cfg"
                   command = "/bin/sh -c 'haproxy -D -f /etc/haproxy/haproxy.cfg -p /run/haproxy-lb.pid -sf $(cat /run/haproxy-lb.pid)'"
                 }
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
