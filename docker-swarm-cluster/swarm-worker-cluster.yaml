@@ -457,7 +457,7 @@ Resources:
                   "advertise_addr" : "{{{ADVERTISE_ADRR}}}",
                   "bind_addr": "{{{BIND_ADRR}}}",
                   "client_addr": "0.0.0.0",
-                  "cert_file": "/certs/live/{{DOMAIN}}/cert.pem",
+                  "cert_file": "/certs/live/{{DOMAIN}}/fullchain.pem",
                   "key_file": "/certs/live/{{DOMAIN}}/privkey.pem",
                   "ca_file": "/certs/live/{{DOMAIN}}/chain.pem",
                   "verify_outgoing": true,
@@ -504,7 +504,7 @@ Resources:
 
                   ssl {
                     enabled = true
-                    cert = "/certs/live/{{DOMAIN}}/cert.pem"
+                    cert = "/certs/live/{{DOMAIN}}/fullchain.pem"
                     key  = "/certs/live/{{DOMAIN}}/privkey.pem"
                     ca_cert = "/certs/live/{{DOMAIN}}/chain.pem"
                   }
