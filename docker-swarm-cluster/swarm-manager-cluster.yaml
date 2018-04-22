@@ -232,6 +232,11 @@ Resources:
         ToPort: '8200'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
+      - IpProtocol: tcp
+        FromPort: '8201'
+        ToPort: '8201'
+        CidrIp:
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'          
 
   HAProxySecurityGroup:
     Type: AWS::EC2::SecurityGroup
