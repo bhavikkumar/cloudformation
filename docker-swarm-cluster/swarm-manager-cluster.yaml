@@ -236,7 +236,7 @@ Resources:
         FromPort: '8201'
         ToPort: '8201'
         CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'          
+          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
   HAProxySecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -309,6 +309,11 @@ Resources:
         ToPort: '80'
         CidrIp: 0.0.0.0/0
         Description: 'Public API Traffic'
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: 0.0.0.0/0
+        Description: 'Secure Public API Traffic'
       - IpProtocol: tcp
         FromPort: '8200'
         ToPort: '8200'
@@ -589,6 +594,23 @@ Resources:
         HttpCode: '200'
       Port: 80
       Protocol: HTTP
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
+
+  HAProxyHttpsTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /health
+      HealthCheckPort: 443
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Port: 443
+      Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
@@ -994,6 +1016,9 @@ Resources:
                       - target: 80
                         published: 80
                         mode: host
+                      - target: 443
+                        published: 443
+                        mode: host
                       - target: 1936
                         published: 1936
                         mode: host
@@ -1231,6 +1256,23 @@ Resources:
       LoadBalancerArn: !Ref ExternalLoadBalancer
       Port: 80
       Protocol: HTTP
+
+  HAProxyHttpsClusterListener:
+    DependsOn:
+      - HAProxyHttpsTargetGroup
+      - ExternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref HAProxyHttpsTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
   HAProxyStatsClusterListener:
     DependsOn:
@@ -1523,6 +1565,11 @@ Outputs:
     Value: !Ref HAProxyHttpTargetGroup
     Export:
       Name: !Sub '${AWS::StackName}-HAProxyHttpTargetGroup'
+  HAProxyHttpsTargetGroup:
+    Description: The HA Proxy target group
+    Value: !Ref HAProxyHttpsTargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-HAProxyHttpsTargetGroup'      
   HAProxyStatsTargetGroup:
     Description: The HA Proxy stats target group
     Value: !Ref HAProxyStatsTargetGroup
