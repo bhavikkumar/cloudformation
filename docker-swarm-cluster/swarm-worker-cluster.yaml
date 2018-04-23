@@ -560,6 +560,8 @@ Resources:
                     acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
                     use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
                     {{ end }}{{ end }}{{ end }}{{ end }}
+                    acl is_stat path_beg /ingress-stats
+                    use_backend ingress_stat if is_stat
                     default_backend nomatch
 
                 {{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
@@ -575,6 +577,9 @@ Resources:
                     server {{.Address}} {{.Address}}:{{.Port}} check
                     {{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}
 
+                backend ingress_stat
+                   server Local 127.0.0.1:1936
+
                 backend nomatch
                     http-request deny deny_status 403
 
@@ -582,6 +587,8 @@ Resources:
                     bind 0.0.0.0:1936
                     stats enable
                     stats uri /
+                    stats show-desc Consul Agent {{with node}}{{.Node.Node}}{{end}}
+                    stats show-node
                     stats hide-version
                     stats auth admin:${HAProxyPassword}
               context:
@@ -624,7 +631,6 @@ Resources:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmClusterSecurityGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxySecurityGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsSecurityGroup'
       UserData:
         "Fn::Base64":
           !Sub |
@@ -663,7 +669,6 @@ Resources:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpsTargetGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsTargetGroup'
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
