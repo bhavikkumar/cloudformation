@@ -256,19 +256,6 @@ Resources:
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
-  HAProxyStatsSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group to allow HTTP/HTTPS traffic
-      VpcId:
-        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
-      SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: '1936'
-        ToPort: '1936'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
-
   InternalLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -611,23 +598,6 @@ Resources:
         HttpCode: '200'
       Port: 443
       Protocol: HTTPS
-      UnhealthyThresholdCount: 4
-      VpcId:
-        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
-
-  HAProxyStatsTargetGroup:
-    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
-    Properties:
-      HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /health
-      HealthCheckPort: 80
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 8
-      HealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200'
-      Port: 1936
-      Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
@@ -1274,19 +1244,6 @@ Resources:
           'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
       SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
-  HAProxyStatsClusterListener:
-    DependsOn:
-      - HAProxyStatsTargetGroup
-      - InternalLoadBalancer
-    Type: 'AWS::ElasticLoadBalancingV2::Listener'
-    Properties:
-      DefaultActions:
-      - TargetGroupArn: !Ref HAProxyStatsTargetGroup
-        Type: forward
-      LoadBalancerArn: !Ref InternalLoadBalancer
-      Port: 1936
-      Protocol: HTTP
-
   PublicDNS:
     DependsOn:
       - ExternalLoadBalancer
@@ -1510,11 +1467,6 @@ Outputs:
     Value: !Ref HAProxySecurityGroup
     Export:
       Name: !Sub '${AWS::StackName}-HAProxySecurityGroup'
-  HAProxyStatsSecurityGroupOutput:
-    Description: The security group which allows HAProxy stats to function
-    Value: !Ref HAProxyStatsSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-HAProxyStatsSecurityGroup'
   SwarmTableName:
     Description: The DynamoDB table name for the swarm cluster
     Value: !Ref SwarmDynamoDBTable
@@ -1569,12 +1521,7 @@ Outputs:
     Description: The HA Proxy target group
     Value: !Ref HAProxyHttpsTargetGroup
     Export:
-      Name: !Sub '${AWS::StackName}-HAProxyHttpsTargetGroup'      
-  HAProxyStatsTargetGroup:
-    Description: The HA Proxy stats target group
-    Value: !Ref HAProxyStatsTargetGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-HAProxyStatsTargetGroup'
+      Name: !Sub '${AWS::StackName}-HAProxyHttpsTargetGroup'
 
 Mappings:
   # This list comes from https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html#AvailableInstanceTypes
