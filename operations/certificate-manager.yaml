@@ -272,7 +272,7 @@ Resources:
             run_certbot:
               command: "sudo docker run --log-driver=fluentd --name certbot -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV --keep-until-expiring -n --agree-tos --rsa-key-size 4096 --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
               env:
-               LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "", "--test-cert" ] }
+               LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "--server https://acme-v02.api.letsencrypt.org/directory", "--test-cert" ] }
                CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
                EMAIL_ADDRESS: { "Ref": "EmailAddress"}
               cwd: "~"
@@ -291,24 +291,29 @@ Resources:
       InstanceType: "t2.nano"
       IamInstanceProfile: !Ref CertificateManagerInstanceProfile
       UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash -xe
-          yum update -y
-          # Check if the lets encrypt tarball exists, then we download and extract it.
-          mkdir -p /etc/letsencrypt
-          EXISTS=$(aws s3 ls s3://${CertificateBucket}/letsencrypt.tar.gz) || true
-          if [ ! -z "$EXISTS" ]; then
-            aws s3 cp s3://${CertificateBucket}/letsencrypt.tar.gz /tmp/letsencrypt.tar.gz
-            tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/
-          fi
-          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource CertBotLaunchConfiguration --configsets full_install --region ${AWS::Region}
-          # If the files were updated then we push the new certificates to the S3 bucket.
-          MODIFY_COUNT=$(find /etc/letsencrypt/ -type f -mmin -15 | wc -l)
-          if [ $MODIFY_COUNT -gt "0" ]; then
-            tar -zcf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt .
-            aws s3 cp /tmp/letsencrypt.tar.gz s3://${CertificateBucket}/ --sse
-          fi
-          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource CertBotAutoScaleGroup --region ${AWS::Region}
+        Fn::Base64:
+          !Sub
+          - |
+            #!/bin/bash -xe
+            yum update -y
+            # Check if the lets encrypt tarball exists, then we download and extract it.
+            mkdir -p /etc/letsencrypt
+            EXISTS=$(aws s3 ls s3://${CertificateBucket}/letsencrypt.tar.gz) || true
+            if [ ! -z "$EXISTS" ]; then
+              aws s3 cp s3://${CertificateBucket}/letsencrypt.tar.gz /tmp/letsencrypt.tar.gz
+              tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/
+            fi
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource CertBotLaunchConfiguration --configsets full_install --region ${AWS::Region}
+            # If the files were updated then we push the new certificates to the S3 bucket.
+            MODIFY_COUNT=$(find /etc/letsencrypt/ -type f -mmin -15 | wc -l)
+            if [ $MODIFY_COUNT -gt "0" ]; then
+              bash -c 'cat /etc/letsencrypt/live/${DOMAIN}/fullchain.pem /etc/letsencrypt/live/${DOMAIN}/privkey.pem > /etc/letsencrypt/live/${DOMAIN}/haproxy.pem'
+              tar -zcf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt .
+              aws s3 cp /tmp/letsencrypt.tar.gz s3://${CertificateBucket}/ --sse
+            fi
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource CertBotAutoScaleGroup --region ${AWS::Region}
+          - DOMAIN:
+              'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
 
   CertBotAutoScaleGroup:
     DependsOn:
@@ -326,7 +331,7 @@ Resources:
         WaitOnResourceSignals: true
     Properties:
       MinSize: 0
-      MaxSize: 2
+      MaxSize: 1
       DesiredCapacity: 1
       HealthCheckType: EC2
       HealthCheckGracePeriod: 300
@@ -373,6 +378,11 @@ Outputs:
     Value: !Ref CertificateBucket
     Export:
       Name: !Sub '${AWS::StackName}-CertificateBucket'
+  CertificateBucketArn:
+    Description: The bucket arn which contains the certificates
+    Value: !GetAtt CertificateBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CertificateBucketArn'
   ACMCertificate:
     Description: The ARN of the certificate created in ACM.
     Value: !Ref ACMCertificate

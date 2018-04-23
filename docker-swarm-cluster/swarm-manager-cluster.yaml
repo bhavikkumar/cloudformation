@@ -12,6 +12,7 @@ Metadata:
       - ParentPrivateZoneStack
       - ParentAlertStack
       - LogAggregatorStack
+      - CertificateStack
     - Label:
         default: 'Docker Swarm Manager Parameters'
       Parameters:
@@ -26,11 +27,6 @@ Metadata:
       - EncryptionToken
       - ConsulACLDataCenter
       - ConsulACLMasterToken
-    # - Label:
-    #     default: 'TLS Certificate Parameters'
-    #   Parameters:
-    #   - CertificateS3Bucket
-    #   - CertificateFileName
 
 Parameters:
   ParentVPCStack:
@@ -47,6 +43,9 @@ Parameters:
     Type: String
   LogAggregatorStack:
     Description: 'The log aggregator stack which was created using operations/fluentd-aggregator.yaml template'
+    Type: String
+  CertificateStack:
+    Description: 'The certificate stack which was created using operations/certificate-manager.yaml template'
     Type: String
   KeyName:
     Description: Amazon EC2 Key Pair
@@ -158,12 +157,6 @@ Parameters:
     NoEcho: true
     Description: 'Only used for servers in the acl_datacenter, allows operators to bootstrap the ACL system with a token that is well-known.'
     Type: String
-  # CertificateS3Bucket:
-  #   Description: 'Secure S3 Bucket which contains the required certificates'
-  #   Type: String
-  # CertificateFileName:
-  #   Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
-  #   Type: String
 
 Conditions:
   HasKeyName: !Not [!Equals [!Ref KeyName, '']]
@@ -175,19 +168,6 @@ Resources:
     Properties:
       DisplayName: 'Manager ASG Notifications'
       TopicName: 'SwarmManagerNotifications'
-
-  SwarmManagerSSHSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow SSH to the Docker Swarm Managers
-      VpcId:
-        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
-      SecurityGroupIngress:
-      # Port 22 is temporary, we will never need it in the future.
-      - IpProtocol: tcp
-        FromPort: '22'
-        ToPort: '22'
-        CidrIp: 0.0.0.0/0
 
   SwarmClusterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -276,19 +256,6 @@ Resources:
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
 
-  HAProxyStatsSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group to allow HTTP/HTTPS traffic
-      VpcId:
-        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
-      SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: '1936'
-        ToPort: '1936'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
-
   InternalLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -304,11 +271,6 @@ Resources:
       - IpProtocol: tcp
         FromPort: '8200'
         ToPort: '8200'
-        CidrIp:
-          'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
-      - IpProtocol: tcp
-        FromPort: '8201'
-        ToPort: '8201'
         CidrIp:
           'Fn::ImportValue': !Sub '${ParentVPCStack}-CidrBlock'
       - IpProtocol: tcp
@@ -333,6 +295,22 @@ Resources:
         FromPort: '80'
         ToPort: '80'
         CidrIp: 0.0.0.0/0
+        Description: 'Public API Traffic'
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: 0.0.0.0/0
+        Description: 'Secure Public API Traffic'
+      - IpProtocol: tcp
+        FromPort: '8200'
+        ToPort: '8200'
+        CidrIp: 0.0.0.0/0
+        Description: 'Public Vault Traffic'
+      - IpProtocol: tcp
+        FromPort: '8500'
+        ToPort: '8500'
+        CidrIp: 0.0.0.0/0
+        Description: 'Public Consul Traffic'
 
   SwarmDynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -439,22 +417,31 @@ Resources:
       Roles:
         - !Ref SwarmManagerRole
 
-  # CertificateBucketPolicy:
-  #   DependsOn:
-  #     - SwarmManagerRole
-  #   Type: AWS::IAM::Policy
-  #   Properties:
-  #     PolicyName: "swarm-manager-certificate-download-policy"
-  #     PolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         -
-  #           Effect: "Allow"
-  #           Action:
-  #             - "s3:GetObject"
-  #           Resource: !Sub 'arn:aws:s3:::${CertificateS3Bucket}/*'
-  #     Roles:
-  #       - !Ref SwarmManagerRole
+  CertificateBucketPolicy:
+    DependsOn:
+      - SwarmManagerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "certificate-download-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+            Resource:
+            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
+          -
+            Effect: "Allow"
+            Action:
+              - s3:ListObjects
+              - "s3:GetObject"
+            Resource:
+            - !Join ["", [ 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*" ] ]
+
+      Roles:
+        - !Ref SwarmManagerRole
 
   SwarmLifecycleQueue:
     Type: AWS::SQS::Queue
@@ -506,7 +493,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '204'
-      Name: !Join ['-', [ !Ref "AWS::StackName", NodeHealthCheck ] ]
       # This port should only be available internally.
       Port: 44444
       Protocol: HTTP
@@ -520,15 +506,30 @@ Resources:
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /v1/health/service/consul
       HealthCheckPort: 8500
-      HealthCheckProtocol: HTTP
+      HealthCheckProtocol: HTTPS
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Join ['-', [ !Ref "AWS::StackName", ConsulCluster ] ]
-      # This port should only be available internally.
       Port: 8500
-      Protocol: HTTP
+      Protocol: HTTPS
+      UnhealthyThresholdCount: 4
+      VpcId:
+        'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
+
+  ConsulExternalTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /v1/health/service/consul
+      HealthCheckPort: 8500
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Port: 8500
+      Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
@@ -539,34 +540,30 @@ Resources:
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /v1/sys/health
       HealthCheckPort: 8200
-      HealthCheckProtocol: HTTP
+      HealthCheckProtocol: HTTPS
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200,429'
-      Name: !Join ['-', [ !Ref "AWS::StackName", Vault ] ]
-      # This port should only be available internally.
       Port: 8200
-      Protocol: HTTP
+      Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
-  VaultClusterTargetGroup:
+  VaultExternalTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /v1/sys/health
       HealthCheckPort: 8200
-      HealthCheckProtocol: HTTP
+      HealthCheckProtocol: HTTPS
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200,429'
-      Name: !Join ['-', [ !Ref "AWS::StackName", VaultCluster ] ]
-      # This port should only be available internally.
-      Port: 8201
-      Protocol: HTTP
+      Port: 8200
+      Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
@@ -582,27 +579,25 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Join ['-', [ !Ref "AWS::StackName", HAProxyCluster ] ]
       Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
 
-  HAProxyStatsTargetGroup:
+  HAProxyHttpsTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /health
-      HealthCheckPort: 80
-      HealthCheckProtocol: HTTP
+      HealthCheckPort: 443
+      HealthCheckProtocol: HTTPS
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Join ['-', [ !Ref "AWS::StackName", HAProxyStatsCluster ] ]
-      Port: 1936
-      Protocol: HTTP
+      Port: 443
+      Protocol: HTTPS
       UnhealthyThresholdCount: 4
       VpcId:
         'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'
@@ -610,13 +605,13 @@ Resources:
   SwarmManagerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
-      # AWS::CloudFormation::Authentication:
-      #   rolebased:
-      #     type: "S3"
-      #     buckets:
-      #       - !Ref CertificateS3Bucket
-      #     roleName:
-      #       Ref: SwarmManagerRole
+      AWS::CloudFormation::Authentication:
+        CertificateAccessCreds:
+          type: "S3"
+          buckets:
+            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+          roleName:
+            Ref: SwarmManagerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
@@ -626,13 +621,12 @@ Resources:
             - init_aws_swarm
             - swarm_node_healthcheck
             - guide_aws_swarm
-            # - certificates
+            - certificates
             - consul
             - vault
             - haproxy
           update_install:
             - install_cfn
-            # - certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -742,6 +736,34 @@ Resources:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
+        certificates:
+          files:
+            /tmp/letsencrypt.tar.gz:
+              source:
+                Fn::Join:
+                  - ""
+                  -
+                    - "https://"
+                    - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+                    - ".s3.amazonaws.com"
+                    - "/letsencrypt.tar.gz"
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              authentication: "CertificateAccessCreds"
+          commands:
+            create_directory:
+              command: "mkdir -p /etc/letsencrypt"
+              cwd: "~"
+            extract_certificates:
+              command: "tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/"
+              cwd: "~"
+            fix_permissions_live:
+              command: "chmod 755 /etc/letsencrypt/live"
+              cwd: "~"
+            fix_permissions_archive:
+              command: "chmod 755 /etc/letsencrypt/archive"
+              cwd: "~"
         init_aws_swarm:
           commands:
             docker_run:
@@ -767,16 +789,24 @@ Resources:
             /opt/consul/config.json:
               content: !Sub |
                 {
-                  "advertise_addr" : "{{ GetInterfaceIP \"eth0\" }}",
-                  "bind_addr": "{{ GetInterfaceIP \"eth0\" }}",
+                  "advertise_addr" : "{{{ADVERTISE_ADRR}}}",
+                  "bind_addr": "{{{BIND_ADRR}}}",
                   "client_addr": "0.0.0.0",
+                  "cert_file": "/certs/live/{{DOMAIN}}/fullchain.pem",
+                  "key_file": "/certs/live/{{DOMAIN}}/privkey.pem",
+                  "ca_file": "/certs/live/{{DOMAIN}}/chain.pem",
+                  "verify_outgoing": true,
+                  "ports" : {
+                    "http": -1,
+                    "https": 8500
+                  },
                   "data_dir": "/consul/data",
                   "datacenter": "${AWS::Region}",
                   "leave_on_terminate" : true,
                   "retry_join" : [
-                    "consul.server"
+                    "consulserver.{{DOMAIN}}"
                   ],
-                  "server_name" : "server.${AWS::Region}.consul",
+                  "domain": "{{DOMAIN}}",
                   "skip_leave_on_interrupt" : true,
                   "bootstrap_expect": ${ManagerClusterSize},
                   "server" : true,
@@ -793,6 +823,11 @@ Resources:
                   "acl_master_token": "${ConsulACLMasterToken}",
                   "acl_agent_token": "${ConsulACLMasterToken}"
                 }
+              context:
+                ADVERTISE_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
+                BIND_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -811,14 +846,22 @@ Resources:
                     networks:
                       default_net:
                         aliases:
-                          - consul.server
+                          - consulserver.{{DOMAIN}}
                     command: "consul agent -config-file /consul/config/config.json"
                     ports:
                       - target: 8500
                         published: 8500
                         mode: host
+                      - target: 8600
+                        published: 8600
+                        mode: host
+                      - target: 8600
+                        published: 8600
+                        protocol: udp
+                        mode: host
                     volumes:
                       - /opt/consul:/consul/config
+                      - /etc/letsencrypt:/certs:ro
                     deploy:
                       mode: global
                       endpoint_mode: dnsrr
@@ -840,14 +883,18 @@ Resources:
                     networks:
                       default_net:
                         aliases:
-                          - consul.server
+                          - consulagent.{{DOMAIN}}
                     command: "consul agent -config-file /consul/config/config.json"
                     ports:
                       - target: 8500
                         published: 8500
                         mode: host
+                      - target: 8600
+                        published: 8600
+                        mode: host
                     volumes:
                       - /opt/consul:/consul/config
+                      - /etc/letsencrypt:/certs:ro
                     deploy:
                       mode: global
                       endpoint_mode: dnsrr
@@ -862,6 +909,9 @@ Resources:
                       placement:
                         constraints:
                           - node.role == worker
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -883,15 +933,22 @@ Resources:
               content: !Sub |
                 ui = true
                 storage "consul" {
-                  address = "127.0.0.1:8500"
+                  address = "consul-server.{{DOMAIN}}:8500"
                   path = "vault/"
-                  scheme="http"
+                  scheme="https"
                   token="${ConsulACLMasterToken}"
+                  tls_cert_file = "/certs/live/{{DOMAIN}}/fullchain.pem"
+                  tls_key_file = "/certs/live/{{DOMAIN}}/privkey.pem"
+                  tls_ca_file = "/certs/live/{{DOMAIN}}/chain.pem"
                 }
                 listener "tcp" {
                   address = "0.0.0.0:8200"
-                  tls_disable = 1
+                  tls_cert_file = "/certs/live/{{DOMAIN}}/fullchain.pem"
+                  tls_key_file = "/certs/live/{{DOMAIN}}/privkey.pem"
                 }
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -899,21 +956,13 @@ Resources:
             config_file_permission:
               command: "chmod 644 /opt/vault/vault.hcl"
             docker_run:
-              command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e 'VAULT_REDIRECT_INTERFACE=eth0' -e VAULT_CLUSTER_ADDR=$VAULT_CLUSTER_ADDR -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
-              env:
-                VAULT_CLUSTER_ADDR: { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : ["InternalLoadBalancer", "DNSName"] }, ":8201" ] ] }
+              command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e VAULT_API_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -v /etc/letsencrypt:/certs:ro -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
               cwd: "~"
             init_vault:
-              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e 'VAULT_SCHEME=http' bhavikk/init-vault:latest"
+              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e VAULT_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -e VAULT_SKIP_VERIFY=true bhavikk/init-vault:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
-        # certificates:
-        #   sources:
-        #     /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
-        #   commands:
-        #     config_file_permission:
-        #       command: "chmod 400 /opt/certificates/*"
         haproxy:
           files:
             /opt/haproxy/compose.yaml:
@@ -931,17 +980,21 @@ Resources:
                     networks:
                       default_net:
                         aliases:
-                          - haproxy.server
-                    command: "-config=/tmp/haproxy.json -consul-addr=consul.server:8500"
+                          - haproxy.{{DOMAIN}}
+                    command: "-config=/tmp/haproxy.json"
                     ports:
                       - target: 80
                         published: 80
+                        mode: host
+                      - target: 443
+                        published: 443
                         mode: host
                       - target: 1936
                         published: 1936
                         mode: host
                     volumes:
                       - /opt/haproxy:/tmp
+                      - /etc/letsencrypt:/certs:ro
                     deploy:
                       mode: global
                       endpoint_mode: dnsrr
@@ -956,6 +1009,9 @@ Resources:
                       placement:
                         constraints:
                           - node.role == worker
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -967,7 +1023,7 @@ Resources:
               cwd: "~"
               ignoreErrors: true
     DependsOn:
-      - SwarmManagerSSHSecurityGroup
+      - PrivateDNS
       - SwarmDynamoDBTable
       - VaultDynamoDBTable
       - SwarmManagerInstanceProfile
@@ -987,7 +1043,6 @@ Resources:
       IamInstanceProfile: !Ref SwarmManagerInstanceProfile
       KeyName: !Ref KeyName
       SecurityGroups:
-        - !Ref SwarmManagerSSHSecurityGroup
         - !Ref SwarmClusterSecurityGroup
         - !Ref ConsulClusterSecurityGroup
         - !Ref VaultClusterSecurityGroup
@@ -1006,8 +1061,8 @@ Resources:
       - SwarmManagerLaunchConfiguration
       - SwarmHealthCheckTargetGroup
       - ConsulTargetGroup
+      - ConsulExternalTargetGroup
       - VaultTargetGroup
-      - VaultClusterTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -1031,8 +1086,9 @@ Resources:
       TargetGroupARNs:
         - !Ref SwarmHealthCheckTargetGroup
         - !Ref ConsulTargetGroup
+        - !Ref ConsulExternalTargetGroup
         - !Ref VaultTargetGroup
-        - !Ref VaultClusterTargetGroup
+        - !Ref VaultExternalTargetGroup
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
@@ -1101,7 +1157,28 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8500
-      Protocol: HTTP
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
+
+  ConsulUiExternalHttpListener:
+    DependsOn:
+      - ConsulExternalTargetGroup
+      - ExternalLoadBalancer
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref ConsulExternalTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 8500
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
   VaultHttpListener:
     DependsOn:
@@ -1114,20 +1191,28 @@ Resources:
         Type: forward
       LoadBalancerArn: !Ref InternalLoadBalancer
       Port: 8200
-      Protocol: HTTP
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
-  VaultClusterHttpListener:
+  VaultExternalHttpListener:
     DependsOn:
-      - VaultClusterTargetGroup
-      - InternalLoadBalancer
+      - VaultExternalTargetGroup
+      - ExternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
-      - TargetGroupArn: !Ref VaultClusterTargetGroup
+      - TargetGroupArn: !Ref VaultExternalTargetGroup
         Type: forward
-      LoadBalancerArn: !Ref InternalLoadBalancer
-      Port: 8201
-      Protocol: HTTP
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 8200
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
   HAProxyHttpClusterListener:
     DependsOn:
@@ -1142,44 +1227,75 @@ Resources:
       Port: 80
       Protocol: HTTP
 
-  HAProxyStatsClusterListener:
+  HAProxyHttpsClusterListener:
     DependsOn:
-      - HAProxyStatsTargetGroup
-      - InternalLoadBalancer
+      - HAProxyHttpsTargetGroup
+      - ExternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
-      - TargetGroupArn: !Ref HAProxyStatsTargetGroup
+      - TargetGroupArn: !Ref HAProxyHttpsTargetGroup
         Type: forward
-      LoadBalancerArn: !Ref InternalLoadBalancer
-      Port: 1936
-      Protocol: HTTP
+      LoadBalancerArn: !Ref ExternalLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn:
+          'Fn::ImportValue': !Sub '${CertificateStack}-CertificateArn'
+      SslPolicy: 'ELBSecurityPolicy-TLS-1-2-2017-01'
 
-  VaultPrivateDNS:
-    DependsOn:
-      - InternalLoadBalancer
-    Type: 'AWS::Route53::RecordSet'
-    Properties:
-      Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
-      Type: A
-      AliasTarget:
-        HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
-        DNSName: !GetAtt InternalLoadBalancer.DNSName
-      HostedZoneId:
-        'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-HostedZoneId'
-
-  APIDNS:
+  PublicDNS:
     DependsOn:
       - ExternalLoadBalancer
-    Type: 'AWS::Route53::RecordSet'
+    Type: 'AWS::Route53::RecordSetGroup'
     Properties:
-      Name: !Join [ '.', [ 'api', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
-      Type: A
-      AliasTarget:
-        HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
-        DNSName: !GetAtt ExternalLoadBalancer.DNSName
       HostedZoneId:
         'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
+      RecordSets:
+      - Name: !Join [ '.', [ 'consul', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ExternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ExternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'api', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ExternalLoadBalancer.DNSName
+
+  PrivateDNS:
+    DependsOn:
+      - InternalLoadBalancer
+    Type: 'AWS::Route53::RecordSetGroup'
+    Properties:
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-HostedZoneId'
+      RecordSets:
+      - Name: !Join [ '.', [ 'consul', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt InternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt InternalLoadBalancer.DNSName
+      - Name: !Join [ '.', [ 'consul-server', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+        Type: A
+        TTL: 300
+        ResourceRecords:
+        - 127.0.0.1
+      - Name: !Join [ '.', [ 'consul-agent', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+        Type: A
+        TTL: 300
+        ResourceRecords:
+        - 172.18.0.1
 
   SwarmManagerLifecycleHook:
     DependsOn:
@@ -1333,9 +1449,6 @@ Resources:
         Value: !GetAtt ExternalLoadBalancer.LoadBalancerFullName
 
 Outputs:
-  ManagerSecurityGroupID:
-    Description: SecurityGroup ID of the Swarm Manager
-    Value: !Ref SwarmManagerSSHSecurityGroup
   ManagerAsgNotificationTopic:
     Description: The ASG notification topic of managers being started or terminated.
     Value: !Ref SwarmManagerAsgNotification
@@ -1354,11 +1467,6 @@ Outputs:
     Value: !Ref HAProxySecurityGroup
     Export:
       Name: !Sub '${AWS::StackName}-HAProxySecurityGroup'
-  HAProxyStatsSecurityGroupOutput:
-    Description: The security group which allows HAProxy stats to function
-    Value: !Ref HAProxyStatsSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-HAProxyStatsSecurityGroup'
   SwarmTableName:
     Description: The DynamoDB table name for the swarm cluster
     Value: !Ref SwarmDynamoDBTable
@@ -1409,11 +1517,11 @@ Outputs:
     Value: !Ref HAProxyHttpTargetGroup
     Export:
       Name: !Sub '${AWS::StackName}-HAProxyHttpTargetGroup'
-  HAProxyStatsTargetGroup:
-    Description: The HA Proxy stats target group
-    Value: !Ref HAProxyStatsTargetGroup
+  HAProxyHttpsTargetGroup:
+    Description: The HA Proxy target group
+    Value: !Ref HAProxyHttpsTargetGroup
     Export:
-      Name: !Sub '${AWS::StackName}-HAProxyStatsTargetGroup'
+      Name: !Sub '${AWS::StackName}-HAProxyHttpsTargetGroup'
 
 Mappings:
   # This list comes from https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html#AvailableInstanceTypes

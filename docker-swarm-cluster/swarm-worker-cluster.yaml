@@ -8,9 +8,11 @@ Metadata:
         default: 'Parent Stacks'
       Parameters:
       - ParentVPCStack
+      - ParentPublicZoneStack
       - ParentAlertStack
       - SwarmManagerStack
       - LogAggregatorStack
+      - CertificateStack
     - Label:
         default: 'Docker Swarm Worker Parameters'
       Parameters:
@@ -25,11 +27,6 @@ Metadata:
       - EncryptionToken
       - ConsulACLDataCenter
       - ConsulACLAgentToken
-    # - Label:
-    #     default: 'TLS Certificate Parameters'
-    #   Parameters:
-    #   - CertificateS3Bucket
-    #   - CertificateFileName
     - Label:
         default: 'HA Proxy Parameters'
       Parameters:
@@ -39,6 +36,9 @@ Parameters:
   ParentVPCStack:
     Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
     Type: String
+  ParentPublicZoneStack:
+    Description: 'Stack name of parent Hosted Zone stack based on dns/*-hosted-zone.yaml template.'
+    Type: String
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
     Type: String
@@ -47,6 +47,9 @@ Parameters:
     Type: String
   LogAggregatorStack:
     Description: 'The log aggregator stack which was created using operations/fluentd-aggregator.yaml template'
+    Type: String
+  CertificateStack:
+    Description: 'The certificate stack which was created using operations/certificate-manager.yaml template'
     Type: String
   DesiredWorkerClusterSize:
     Description: The desired number of swarm worker nodes
@@ -207,8 +210,7 @@ Resources:
             Action:
               - "dynamodb:GetItem"
             Resource:
-              Fn::ImportValue:
-                !Sub "${SwarmManagerStack}-SwarmTableArn"
+            - 'Fn::ImportValue': !Sub "${SwarmManagerStack}-SwarmTableArn"
       Roles:
         - !Ref SwarmWorkerRole
 
@@ -231,22 +233,31 @@ Resources:
       Roles:
         - !Ref SwarmWorkerRole
 
-  # CertificateBucketPolicy:
-  #   DependsOn:
-  #     - SwarmWorkerRole
-  #   Type: AWS::IAM::Policy
-  #   Properties:
-  #     PolicyName: "swarm-worker-certificate-download-policy"
-  #     PolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         -
-  #           Effect: "Allow"
-  #           Action:
-  #             - "s3:GetObject"
-  #           Resource: !Sub 'arn:aws:s3:::${CertificateS3Bucket}/*'
-  #     Roles:
-  #       - !Ref SwarmWorkerRole
+  CertificateBucketPolicy:
+    DependsOn:
+      - SwarmWorkerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "certificate-download-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+            Resource:
+            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
+          -
+            Effect: "Allow"
+            Action:
+              - s3:ListObjects
+              - "s3:GetObject"
+            Resource:
+            - !Join ["", [ 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*" ] ]
+
+      Roles:
+        - !Ref SwarmWorkerRole
 
   SwarmLifecycleQueuePolicy:
     DependsOn:
@@ -281,27 +292,26 @@ Resources:
   SwarmWorkerLaunchConfiguration:
     Metadata:
       Comment: Update, Install Docker and initialise the swarm
-      # AWS::CloudFormation::Authentication:
-      #   rolebased:
-      #     type: "S3"
-      #     buckets:
-      #       - !Ref CertificateS3Bucket
-      #     roleName:
-      #       Ref: SwarmWorkerRole
+      AWS::CloudFormation::Authentication:
+        CertificateAccessCreds:
+          type: "S3"
+          buckets:
+            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+          roleName:
+            Ref: SwarmWorkerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
             - install_cfn
             - install_docker
             - setup_logging
-            # - certificates
+            - certificates
             - consul_config
             - haproxy_config
             - init_aws_swarm
             - swarm_node_healthcheck
           update_install:
             - install_cfn
-            # - certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -411,27 +421,57 @@ Resources:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
-        # certificates:
-        #   sources:
-        #     /opt/certificates: !Join ['', [ 'https://', { "Ref" : "CertificateS3Bucket" }, '.s3.amazonaws.com/', { "Ref" : "CertificateFileName" } ] ]
-        #   commands:
-        #     config_file_permission:
-        #       command: "chmod 400 /opt/certificates/*"
+        certificates:
+          files:
+            /tmp/letsencrypt.tar.gz:
+              source:
+                Fn::Join:
+                  - ""
+                  -
+                    - "https://"
+                    - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+                    - ".s3.amazonaws.com"
+                    - "/letsencrypt.tar.gz"
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              authentication: "CertificateAccessCreds"
+          commands:
+            create_directory:
+              command: "mkdir -p /etc/letsencrypt"
+              cwd: "~"
+            extract_certificates:
+              command: "tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/"
+              cwd: "~"
+            fix_permissions_live:
+              command: "chmod 755 /etc/letsencrypt/live"
+              cwd: "~"
+            fix_permissions_archive:
+              command: "chmod 755 /etc/letsencrypt/archive"
+              cwd: "~"
         consul_config:
           files:
             /opt/consul/config.json:
               content: !Sub |
                 {
-                  "advertise_addr" : "{{ GetInterfaceIP \"eth0\" }}",
-                  "bind_addr": "{{ GetInterfaceIP \"eth0\" }}",
+                  "advertise_addr" : "{{{ADVERTISE_ADRR}}}",
+                  "bind_addr": "{{{BIND_ADRR}}}",
                   "client_addr": "0.0.0.0",
+                  "cert_file": "/certs/live/{{DOMAIN}}/fullchain.pem",
+                  "key_file": "/certs/live/{{DOMAIN}}/privkey.pem",
+                  "ca_file": "/certs/live/{{DOMAIN}}/chain.pem",
+                  "verify_outgoing": true,
+                  "ports" : {
+                    "http": -1,
+                    "https": 8500
+                  },
                   "data_dir": "/consul/data",
                   "datacenter": "${AWS::Region}",
                   "leave_on_terminate" : true,
                   "retry_join" : [
-                    "consul.server"
+                    "consulserver.{{DOMAIN}}"
                   ],
-                  "server_name" : "agent.${AWS::Region}.consul",
+                  "domain": "{{DOMAIN}}",
                   "skip_leave_on_interrupt" : false,
                   "server" : false,
                   "ui" : false,
@@ -443,6 +483,11 @@ Resources:
                   "acl_down_policy": "extend-cache",
                   "acl_agent_token": "${ConsulACLAgentToken}"
                 }
+              context:
+                ADVERTISE_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
+                BIND_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -452,28 +497,45 @@ Resources:
         haproxy_config:
           files:
             /opt/haproxy/haproxy.json:
-              content:
+              content: !Sub |
+                consul {
+                  address = "consul-agent.{{DOMAIN}}:8500"
+                  token = "${ConsulACLAgentToken}"
+
+                  ssl {
+                    enabled = true
+                    cert = "/certs/live/{{DOMAIN}}/fullchain.pem"
+                    key  = "/certs/live/{{DOMAIN}}/privkey.pem"
+                    ca_cert = "/certs/live/{{DOMAIN}}/chain.pem"
+                  }
+                }
                 template {
                   source = "/tmp/haproxy.ctmpl"
                   destination = "/etc/haproxy/haproxy.cfg"
                   command = "/bin/sh -c 'haproxy -D -f /etc/haproxy/haproxy.cfg -p /run/haproxy-lb.pid -sf $(cat /run/haproxy-lb.pid)'"
                 }
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
             /opt/haproxy/haproxy.ctmpl:
               content: !Sub |
+                {{=<% %>=}}
                 global
                     log 127.0.0.1   local0
                     log 127.0.0.1   local1 notice
-                    debug
                     stats timeout 30s
                     maxconn 1024
+                    ssl-default-bind-ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256
+                    ssl-default-bind-options no-sslv3 no-tls-tickets no-tlsv10 no-tlsv11
 
                 defaults
                     log global
                     option httplog
                     option dontlognull
+                    option forwardfor
                     mode http
                     timeout connect 5000
                     timeout client  50000
@@ -481,11 +543,26 @@ Resources:
 
                 frontend http-in
                     bind 0.0.0.0:80
-                    monitor-uri /health{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                    monitor-uri /health
+                    redirect scheme https code 301 if !{ ssl_fc }
+
+                frontend https-in
+                    http-response set-header Strict-Transport-Security max-age=31536000;\ includeSubdomains;\ preload
+                    http-response set-header X-Frame-Options DENY
+                    http-response set-header X-Content-Type-Options nosniff
+                    bind 0.0.0.0:443 ssl crt /certs/live/<% DOMAIN %>/haproxy.pem
+                    monitor-uri /health
+                    # Add X-Headers necessary for HTTPS
+                    http-request set-header X-Forwarded-Host %[req.hdr(Host)]
+                    http-request set-header X-Forwarded-Proto https
+                    {{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
                     # Edge for {{ $service.Name }}, Version: {{ $version }}
                     acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
                     use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
                     {{ end }}{{ end }}{{ end }}{{ end }}
+                    acl is_stat path_beg /ingress-stats
+                    use_backend ingress_stat if is_stat
+                    default_backend nomatch
 
                 {{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
                 # Backend for {{ $service.Name }}, Version: {{ $version }}
@@ -500,12 +577,23 @@ Resources:
                     server {{.Address}} {{.Address}}:{{.Port}} check
                     {{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}
 
+                backend ingress_stat
+                   server Local 127.0.0.1:1936
+
+                backend nomatch
+                    http-request deny deny_status 403
+
                 listen stats
                     bind 0.0.0.0:1936
                     stats enable
                     stats uri /
+                    stats show-desc Consul Agent {{with node}}{{.Node.Node}}{{end}}
+                    stats show-node
                     stats hide-version
                     stats auth admin:${HAProxyPassword}
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -542,10 +630,7 @@ Resources:
       SecurityGroups:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmClusterSecurityGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxySecurityGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsSecurityGroup'
       UserData:
         "Fn::Base64":
           !Sub |
@@ -583,7 +668,7 @@ Resources:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmHealthCheckTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpTargetGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsTargetGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpsTargetGroup'
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
         - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
