@@ -291,24 +291,29 @@ Resources:
       InstanceType: "t2.nano"
       IamInstanceProfile: !Ref CertificateManagerInstanceProfile
       UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash -xe
-          yum update -y
-          # Check if the lets encrypt tarball exists, then we download and extract it.
-          mkdir -p /etc/letsencrypt
-          EXISTS=$(aws s3 ls s3://${CertificateBucket}/letsencrypt.tar.gz) || true
-          if [ ! -z "$EXISTS" ]; then
-            aws s3 cp s3://${CertificateBucket}/letsencrypt.tar.gz /tmp/letsencrypt.tar.gz
-            tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/
-          fi
-          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource CertBotLaunchConfiguration --configsets full_install --region ${AWS::Region}
-          # If the files were updated then we push the new certificates to the S3 bucket.
-          MODIFY_COUNT=$(find /etc/letsencrypt/ -type f -mmin -15 | wc -l)
-          if [ $MODIFY_COUNT -gt "0" ]; then
-            tar -zcf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt .
-            aws s3 cp /tmp/letsencrypt.tar.gz s3://${CertificateBucket}/ --sse
-          fi
-          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource CertBotAutoScaleGroup --region ${AWS::Region}
+        Fn::Base64:
+          !Sub
+          - |
+            #!/bin/bash -xe
+            yum update -y
+            # Check if the lets encrypt tarball exists, then we download and extract it.
+            mkdir -p /etc/letsencrypt
+            EXISTS=$(aws s3 ls s3://${CertificateBucket}/letsencrypt.tar.gz) || true
+            if [ ! -z "$EXISTS" ]; then
+              aws s3 cp s3://${CertificateBucket}/letsencrypt.tar.gz /tmp/letsencrypt.tar.gz
+              tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/
+            fi
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource CertBotLaunchConfiguration --configsets full_install --region ${AWS::Region}
+            # If the files were updated then we push the new certificates to the S3 bucket.
+            MODIFY_COUNT=$(find /etc/letsencrypt/ -type f -mmin -15 | wc -l)
+            if [ $MODIFY_COUNT -gt "0" ]; then
+              bash -c 'cat /etc/letsencrypt/live/${DOMAIN}/fullchain.pem /etc/letsencrypt/live/${DOMAIN}/privkey.pem > /etc/letsencrypt/live/${DOMAIN}/haproxy.pem'
+              tar -zcf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt .
+              aws s3 cp /tmp/letsencrypt.tar.gz s3://${CertificateBucket}/ --sse
+            fi
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource CertBotAutoScaleGroup --region ${AWS::Region}
+          - DOMAIN:
+              'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
 
   CertBotAutoScaleGroup:
     DependsOn:
