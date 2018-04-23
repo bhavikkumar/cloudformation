@@ -38,7 +38,7 @@ Parameters:
     Type: String
   ParentPublicZoneStack:
     Description: 'Stack name of parent Hosted Zone stack based on dns/*-hosted-zone.yaml template.'
-    Type: String    
+    Type: String
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
     Type: String
@@ -522,17 +522,20 @@ Resources:
               group: root
             /opt/haproxy/haproxy.ctmpl:
               content: !Sub |
+                {{=<% %>=}}
                 global
                     log 127.0.0.1   local0
                     log 127.0.0.1   local1 notice
-                    debug
                     stats timeout 30s
                     maxconn 1024
+                    ssl-default-bind-ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256
+                    ssl-default-bind-options no-sslv3 no-tls-tickets no-tlsv10 no-tlsv11
 
                 defaults
                     log global
                     option httplog
                     option dontlognull
+                    option forwardfor
                     mode http
                     timeout connect 5000
                     timeout client  50000
@@ -540,11 +543,24 @@ Resources:
 
                 frontend http-in
                     bind 0.0.0.0:80
-                    monitor-uri /health{{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
+                    monitor-uri /health
+                    redirect scheme https code 301 if !{ ssl_fc }
+
+                frontend https-in
+                    http-response set-header Strict-Transport-Security max-age=31536000;\ includeSubdomains;\ preload
+                    http-response set-header X-Frame-Options DENY
+                    http-response set-header X-Content-Type-Options nosniff
+                    bind 0.0.0.0:443 ssl crt /certs/live/<% DOMAIN %>/haproxy.pem
+                    monitor-uri /health
+                    # Add X-Headers necessary for HTTPS
+                    http-request set-header X-Forwarded-Host %[req.hdr(Host)]
+                    http-request set-header X-Forwarded-Proto https
+                    {{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
                     # Edge for {{ $service.Name }}, Version: {{ $version }}
                     acl {{ $service.Name }}{{ $version }} path_beg /v{{ $version }}/{{ $service.Name }}
                     use_backend {{ $service.Name }}{{ $version }} if {{ $service.Name }}{{ $version }}
                     {{ end }}{{ end }}{{ end }}{{ end }}
+                    default_backend nomatch
 
                 {{ range $i, $service := services }}{{ range $tag := .Tags }}{{ if $tag | regexMatch "^version=.+" }}{{ $version := index (. | split "=") 1 }}{{ if $service.Tags | contains "edge" }}
                 # Backend for {{ $service.Name }}, Version: {{ $version }}
@@ -559,12 +575,18 @@ Resources:
                     server {{.Address}} {{.Address}}:{{.Port}} check
                     {{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}
 
+                backend nomatch
+                    http-request deny deny_status 403
+
                 listen stats
                     bind 0.0.0.0:1936
                     stats enable
                     stats uri /
                     stats hide-version
                     stats auth admin:${HAProxyPassword}
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
               mode: '000755'
               owner: root
               group: root
@@ -640,6 +662,7 @@ Resources:
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmHealthCheckTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpTargetGroup'
+        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpsTargetGroup'
         - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyStatsTargetGroup'
       VPCZoneIdentifier:
         - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
