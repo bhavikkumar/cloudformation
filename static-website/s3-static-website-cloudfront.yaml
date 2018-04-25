@@ -208,7 +208,6 @@ Resources:
           MinTTL: !Ref MinimumTTL
           ForwardedValues:
             QueryString: false
-            Cookies:
             Forward: none
           ViewerProtocolPolicy: redirect-to-https
         Logging:
