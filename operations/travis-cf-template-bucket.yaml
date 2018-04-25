@@ -60,17 +60,19 @@ Resources:
         -
           Effect: 'Allow'
           Action:
-          - 's3:CreateBucket'
+          - 's3:ListBucket'
+          - 's3:ListObjects'
           - 's3:PutObject'
+          - 's3:DeleteObject'
           Resource:
           - !Join ["", ["arn:aws:s3:::", !Ref Bucket]]
+          - !Join ["", ["arn:aws:s3:::", !Ref Bucket, "/*"]]
         -
           Effect: 'Allow'
           Action:
-          - 's3:CreateBucket'
-          - 's3:PutObject'
+          - 'cloudformation:ValidateTemplate'
           Resource:
-          - !Join ["", ["arn:aws:s3:::", !Ref Bucket, "/*"]]
+          - '*'
 
   BuildCredentials:
     Type: 'AWS::IAM::AccessKey'
