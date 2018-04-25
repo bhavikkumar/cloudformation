@@ -31,6 +31,7 @@ Metadata:
         default: 'HA Proxy Parameters'
       Parameters:
       - HAProxyPassword
+      - ConsulACLReadToken
 
 Parameters:
   ParentVPCStack:
@@ -157,17 +158,15 @@ Parameters:
     Type: String
   ConsulACLAgentToken:
     NoEcho: true
-    Description: 'Special token that is used for an agents internal operations. This token should be created before this template is run.'
+    Description: 'Special token that is used for an agents internal operations. This token should be created in Consul before this template is run.'
     Type: String
-  # CertificateS3Bucket:
-  #   Description: 'Secure S3 Bucket which contains the required certificates'
-  #   Type: String
-  # CertificateFileName:
-  #   Description: 'Certificate file name, supported file extensions are tar, tar+gzip, tar+bz2 and zip.'
-  #   Type: String
   HAProxyPassword:
     NoEcho: true
     Description: 'Password for HA Proxy Stats endpoint'
+    Type: String
+  ConsulACLReadToken:
+    NoEcho: true
+    Description: 'Special token that allows read only access to consul. This token should be created in Consul before this template is run.'
     Type: String
 
 Conditions:
@@ -476,7 +475,7 @@ Resources:
                   "server" : false,
                   "ui" : false,
                   "disable_update_check": true,
-                  "log_level": "warn",
+                  "log_level": "info",
                   "encrypt": "${EncryptionToken}",
                   "acl_datacenter": "${ConsulACLDataCenter}",
                   "acl_default_policy": "deny",
@@ -500,7 +499,7 @@ Resources:
               content: !Sub |
                 consul {
                   address = "consul-agent.{{DOMAIN}}:8500"
-                  token = "${ConsulACLAgentToken}"
+                  token = "${ConsulACLReadToken}"
 
                   ssl {
                     enabled = true
