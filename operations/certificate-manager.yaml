@@ -35,14 +35,14 @@ Parameters:
     Type: String
     Default: staging
     AllowedValues:
-      - staging
-      - production
+    - staging
+    - production
   EmailAddress:
     Description: The email address which lets encrypt will email when certificates are about to expire
     Type: String
 
 Conditions:
-  CreateProdCertificates: !Equals [ !Ref LEEnvironment, 'production' ]
+  CreateProdCertificates: !Equals [!Ref LEEnvironment, 'production']
 
 Resources:
   CertificateManagerAsgNotification:
@@ -57,75 +57,75 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Principal:
-              Service:
-                - "ec2.amazonaws.com"
-            Action:
-              - "sts:AssumeRole"
+        -
+          Effect: "Allow"
+          Principal:
+            Service:
+            - "ec2.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
       Path: /
 
   CertificateBotPolicy:
     DependsOn:
-      - CertificateManagerRole
+    - CertificateManagerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "certbot-route53-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "route53:ListHostedZones"
-              - "route53:GetChange"
-            Resource: "*"
-          -
-            Effect: "Allow"
-            Action:
-              - "route53:ChangeResourceRecordSets"
-            Resource: !Join [ '', [ 'arn:aws:route53:::hostedzone/', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId' ] ]
+        -
+          Effect: "Allow"
+          Action:
+          - "route53:ListHostedZones"
+          - "route53:GetChange"
+          Resource: "*"
+        -
+          Effect: "Allow"
+          Action:
+          - "route53:ChangeResourceRecordSets"
+          Resource: !Join ['', ['arn:aws:route53:::hostedzone/', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId']]
       Roles:
-        - !Ref CertificateManagerRole
+      - !Ref CertificateManagerRole
 
   CertificateBucketPolicy:
     DependsOn:
-      - CertificateManagerRole
-      - CertificateBucket
+    - CertificateManagerRole
+    - CertificateBucket
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "certificate-bucket-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "s3:ListBucket"
-            Resource:
-            - !Join ["", ["arn:aws:s3:::", !Ref CertificateBucket ] ]
-          -
-            Effect: "Allow"
-            Action:
-              - s3:ListObjects
-              - s3:ListBucket
-              - s3:GetObject
-              - s3:PutObject
-            Resource:
-            - !Join ["", ["arn:aws:s3:::", !Ref CertificateBucket, "/*" ] ]
+        -
+          Effect: "Allow"
+          Action:
+          - "s3:ListBucket"
+          Resource:
+          - !Join ["", ["arn:aws:s3:::", !Ref CertificateBucket]]
+        -
+          Effect: "Allow"
+          Action:
+          - s3:ListObjects
+          - s3:ListBucket
+          - s3:GetObject
+          - s3:PutObject
+          Resource:
+          - !Join ["", ["arn:aws:s3:::", !Ref CertificateBucket, "/*"]]
       Roles:
-        - !Ref CertificateManagerRole
+      - !Ref CertificateManagerRole
 
   CertificateManagerInstanceProfile:
     DependsOn:
-      - CertificateBucketPolicy
-      - CertificateBotPolicy
+    - CertificateBucketPolicy
+    - CertificateBotPolicy
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
-        - !Ref CertificateManagerRole
+      - !Ref CertificateManagerRole
 
   CertificateBucket:
     Type: "AWS::S3::Bucket"
@@ -134,8 +134,8 @@ Resources:
       AccessControl: Private
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
 
   ACMCertificate:
     Type: "AWS::CertificateManager::Certificate"
@@ -143,7 +143,7 @@ Resources:
       DomainName:
         'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
       SubjectAlternativeNames:
-        - !Join [ '.', [ '*', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+      - !Join ['.', ['*', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName']]
 
   CertBotLaunchConfiguration:
     Metadata:
@@ -151,13 +151,13 @@ Resources:
       AWS::CloudFormation::Init:
         configSets:
           full_install:
-            - install_cfn
-            - install_docker
-            - setup_logging
-            - create_renew_certificates
+          - install_cfn
+          - install_docker
+          - setup_logging
+          - create_renew_certificates
           update_install:
-            - install_cfn
-            - create_renew_certificates
+          - install_cfn
+          - create_renew_certificates
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -197,7 +197,7 @@ Resources:
                 enabled: 'true'
                 ensureRunning: 'true'
                 files:
-                  - "/etc/rsyslog.d/10-ship-syslog.conf"
+                - "/etc/rsyslog.d/10-ship-syslog.conf"
           files:
             /etc/rsyslog.d/10-ship-syslog.conf:
               content: |
@@ -272,21 +272,21 @@ Resources:
             run_certbot:
               command: "sudo docker run --log-driver=fluentd --name certbot -v /etc/letsencrypt:/etc/letsencrypt certbot/dns-route53 certonly $LE_ENV --keep-until-expiring -n --agree-tos --rsa-key-size 4096 --email $EMAIL_ADDRESS --dns-route53 -d $CERT_DOMAIN -d *.$CERT_DOMAIN"
               env:
-               LE_ENV: { "Fn::If" : [ "CreateProdCertificates", "--server https://acme-v02.api.letsencrypt.org/directory", "--test-cert" ] }
-               CERT_DOMAIN: { "Fn::ImportValue" : {"Fn::Sub": "${ParentPublicZoneStack}-DomainName" } }
-               EMAIL_ADDRESS: { "Ref": "EmailAddress"}
+                LE_ENV: {"Fn::If": ["CreateProdCertificates", "--server https://acme-v02.api.letsencrypt.org/directory", "--test-cert"]}
+                CERT_DOMAIN: {"Fn::ImportValue": {"Fn::Sub": "${ParentPublicZoneStack}-DomainName"}}
+                EMAIL_ADDRESS: {"Ref": "EmailAddress"}
               cwd: "~"
     DependsOn:
-      - CertificateManagerInstanceProfile
-      - CertificateBucket
+    - CertificateManagerInstanceProfile
+    - CertificateBucket
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
       BlockDeviceMappings:
-        - DeviceName: "/dev/xvda"
-          Ebs:
-            VolumeSize: "8"
-            VolumeType: "gp2"
+      - DeviceName: "/dev/xvda"
+        Ebs:
+          VolumeSize: "8"
+          VolumeType: "gp2"
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, 't2.nano', Arch]]
       InstanceType: "t2.nano"
       IamInstanceProfile: !Ref CertificateManagerInstanceProfile
@@ -317,7 +317,7 @@ Resources:
 
   CertBotAutoScaleGroup:
     DependsOn:
-      - CertBotLaunchConfiguration
+    - CertBotLaunchConfiguration
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -337,24 +337,24 @@ Resources:
       HealthCheckGracePeriod: 300
       LaunchConfigurationName: !Ref CertBotLaunchConfiguration
       MetricsCollection:
-        - Granularity: 1Minute
+      - Granularity: 1Minute
       VPCZoneIdentifier:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+      - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
       NotificationConfigurations:
       - TopicARN:
           !Ref CertificateManagerAsgNotification
         NotificationTypes:
-          - autoscaling:EC2_INSTANCE_LAUNCH
-          - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
-          - autoscaling:EC2_INSTANCE_TERMINATE
-          - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+        - autoscaling:EC2_INSTANCE_LAUNCH
+        - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+        - autoscaling:EC2_INSTANCE_TERMINATE
+        - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
       Tags:
-        -
-          Key: node-type
-          PropagateAtLaunch: true
-          Value: certificate-manager
+      -
+        Key: node-type
+        PropagateAtLaunch: true
+        Value: certificate-manager
 
   CertBotDailyRunSchedule:
     Type: AWS::AutoScaling::ScheduledAction

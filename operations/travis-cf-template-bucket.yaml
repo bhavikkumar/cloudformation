@@ -45,36 +45,36 @@ Resources:
 
   BuildUserPolicy:
     Type: 'AWS::IAM::Policy'
-    DependsOn : BuildUser
+    DependsOn: BuildUser
     Properties:
       PolicyName: !Sub '${AWS::StackName}-BuildUser-Policy'
       Users:
-        - !Ref BuildUser
+      - !Ref BuildUser
       PolicyDocument:
         Statement:
-          -
-            Effect: 'Allow'
-            Action:
-              - 's3:ListAllMyBuckets'
-            Resource: 'arn:aws:s3:::*'
-          -
-            Effect: 'Allow'
-            Action:
-              - 's3:CreateBucket'
-              - 's3:PutObject'
-            Resource:
-            - !Join ["", ["arn:aws:s3:::", !Ref Bucket ] ]
-          -
-            Effect: 'Allow'
-            Action:
-              - 's3:CreateBucket'
-              - 's3:PutObject'
-            Resource:
-            - !Join ["", ["arn:aws:s3:::", !Ref Bucket, "/*"]]
+        -
+          Effect: 'Allow'
+          Action:
+          - 's3:ListAllMyBuckets'
+          Resource: 'arn:aws:s3:::*'
+        -
+          Effect: 'Allow'
+          Action:
+          - 's3:CreateBucket'
+          - 's3:PutObject'
+          Resource:
+          - !Join ["", ["arn:aws:s3:::", !Ref Bucket]]
+        -
+          Effect: 'Allow'
+          Action:
+          - 's3:CreateBucket'
+          - 's3:PutObject'
+          Resource:
+          - !Join ["", ["arn:aws:s3:::", !Ref Bucket, "/*"]]
 
   BuildCredentials:
     Type: 'AWS::IAM::AccessKey'
-    DependsOn : BuildUser
+    DependsOn: BuildUser
     Properties:
       UserName: !Ref BuildUser
 

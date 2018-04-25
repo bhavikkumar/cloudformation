@@ -1,3 +1,4 @@
+---
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Route 53 Hosted Zone'
 Metadata:
@@ -19,7 +20,7 @@ Resources:
     Type: 'AWS::Route53::HostedZone'
     Properties:
       HostedZoneConfig:
-        Comment: !Join [ ' ', [ 'Public DNS Zone for', !Ref DomainName ] ]
+        Comment: !Join [' ', ['Public DNS Zone for', !Ref DomainName]]
       Name: !Ref DomainName
       HostedZoneTags:
       -

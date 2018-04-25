@@ -10,20 +10,20 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Allow administrators to assume AdminAccessRole in any account
-          -
-            Effect: "Allow"
-            Action:
-              - "sts:AssumeRole"
-            Resource:
-              - "arn:aws:iam::*:role/AdminAccessRole"
+        # Allow administrators to assume AdminAccessRole in any account
+        -
+          Effect: "Allow"
+          Action:
+          - "sts:AssumeRole"
+          Resource:
+          - "arn:aws:iam::*:role/AdminAccessRole"
 
   AdminGroup:
     Type: "AWS::IAM::Group"
     Properties:
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/AdministratorAccess"
-        - !Ref AssumeAdminAccessRolePolicy
+      - "arn:aws:iam::aws:policy/AdministratorAccess"
+      - !Ref AssumeAdminAccessRolePolicy
 
 Outputs:
   AdminGroupName:

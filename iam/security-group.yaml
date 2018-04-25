@@ -10,13 +10,13 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Allow security users to assume SecurityAuditAccessRole in any account
-          -
-            Effect: "Allow"
-            Action:
-              - "sts:AssumeRole"
-            Resource:
-              - "arn:aws:iam::*:role/SecurityAuditAccessRole"
+        # Allow security users to assume SecurityAuditAccessRole in any account
+        -
+          Effect: "Allow"
+          Action:
+          - "sts:AssumeRole"
+          Resource:
+          - "arn:aws:iam::*:role/SecurityAuditAccessRole"
 
   SecurityAuditPolicy:
     Type: "AWS::IAM::ManagedPolicy"
@@ -25,20 +25,20 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Allow security users to assume SecurityAuditAccessRole in any account
-          -
-            Effect: "Allow"
-            Action:
-              - "cloudtrail:LookupEvents"
-            Resource:
-              - "*"
+        # Allow security users to assume SecurityAuditAccessRole in any account
+        -
+          Effect: "Allow"
+          Action:
+          - "cloudtrail:LookupEvents"
+          Resource:
+          - "*"
   SecurityGroup:
     Type: "AWS::IAM::Group"
     Properties:
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/SecurityAudit"
-        - !Ref AssumeSecurityAuditAccessRolePolicy
-        - !Ref SecurityAuditPolicy
+      - "arn:aws:iam::aws:policy/SecurityAudit"
+      - !Ref AssumeSecurityAuditAccessRolePolicy
+      - !Ref SecurityAuditPolicy
 
 Outputs:
   SecurityGroupName:
