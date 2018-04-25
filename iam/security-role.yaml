@@ -22,13 +22,13 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Allow security users to assume SecurityAuditAccessRole in any account
-          -
-            Effect: "Allow"
-            Action:
-              - "cloudtrail:LookupEvents"
-            Resource:
-              - "*"
+        # Allow security users to assume SecurityAuditAccessRole in any account
+        -
+          Effect: "Allow"
+          Action:
+          - "cloudtrail:LookupEvents"
+          Resource:
+          - "*"
 
   SecurityAuditRole:
     Type: 'AWS::IAM::Role'
@@ -36,21 +36,20 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          -
-            Effect: Allow
-            Principal:
-              AWS:
-                  - !Join ['', [ 'arn:aws:iam::', !Ref TrustedAccount, ':root' ] ]
-            Action:
-              - 'sts:AssumeRole'
-            Condition:
-              BoolIfExists:
-                aws:MultiFactorAuthPresent: true
+        -
+          Effect: Allow
+          Principal:
+            AWS:
+            - !Join ['', ['arn:aws:iam::', !Ref TrustedAccount, ':root']]
+          Action:
+          - 'sts:AssumeRole'
+          Condition:
+            BoolIfExists:
+              aws:MultiFactorAuthPresent: true
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/SecurityAudit
-        - !Ref SecurityAuditPolicy
+      - arn:aws:iam::aws:policy/SecurityAudit
+      - !Ref SecurityAuditPolicy
       RoleName: 'SecurityAuditAccessRole'
-
 
 Outputs:
   SecurityAuditRoleName:

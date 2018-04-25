@@ -67,75 +67,75 @@ Parameters:
     Type: String
     Default: t2.micro
     AllowedValues:
-      - t2.nano
-      - t2.micro
-      - t2.small
-      - t2.medium
-      - t2.large
-      - t2.xlarge
-      - t2.2xlarge
-      - m4.large
-      - m4.xlarge
-      - m4.2xlarge
-      - m4.4xlarge
-      - m4.10xlarge
-      - m4.16xlarge
-      - m5.large
-      - m5.xlarge
-      - m5.2xlarge
-      - m5.4xlarge
-      - m5.12xlarge
-      - m5.24xlarge
-      - c4.large
-      - c4.xlarge
-      - c4.2xlarge
-      - c4.4xlarge
-      - c4.8xlarge
-      - c5.large
-      - c5.xlarge
-      - c5.2xlarge
-      - c5.4xlarge
-      - c5.9xlarge
-      - c5.18xlarge
-      - r4.large
-      - r4.xlarge
-      - r4.2xlarge
-      - r4.4xlarge
-      - r4.8xlarge
-      - r4.16xlarge
-      - x1.16xlarge
-      - x1.32xlarge
-      - x1e.xlarge
-      - x1e.2xlarge
-      - x1e.4xlarge
-      - x1e.8xlarge
-      - x1e.16xlarge
-      - x1e.32xlarge
-      - d2.xlarge
-      - d2.2xlarge
-      - d2.4xlarge
-      - d2.8xlarge
-      - h1.2xlarge
-      - h1.4xlarge
-      - h1.8xlarge
-      - h1.16xlarge
-      - i3.large
-      - i3.xlarge
-      - i3.2xlarge
-      - i3.4xlarge
-      - i3.8xlarge
-      - i3.16xlarge
-      - f1.2xlarge
-      - f1.16xlarge
-      - g3.4xlarge
-      - g3.8xlarge
-      - g3.16xlarge
-      - p2.xlarge
-      - p2.8xlarge
-      - p2.16xlarge
-      - p3.2xlarge
-      - p3.8xlarge
-      - p3.16xlarge
+    - t2.nano
+    - t2.micro
+    - t2.small
+    - t2.medium
+    - t2.large
+    - t2.xlarge
+    - t2.2xlarge
+    - m4.large
+    - m4.xlarge
+    - m4.2xlarge
+    - m4.4xlarge
+    - m4.10xlarge
+    - m4.16xlarge
+    - m5.large
+    - m5.xlarge
+    - m5.2xlarge
+    - m5.4xlarge
+    - m5.12xlarge
+    - m5.24xlarge
+    - c4.large
+    - c4.xlarge
+    - c4.2xlarge
+    - c4.4xlarge
+    - c4.8xlarge
+    - c5.large
+    - c5.xlarge
+    - c5.2xlarge
+    - c5.4xlarge
+    - c5.9xlarge
+    - c5.18xlarge
+    - r4.large
+    - r4.xlarge
+    - r4.2xlarge
+    - r4.4xlarge
+    - r4.8xlarge
+    - r4.16xlarge
+    - x1.16xlarge
+    - x1.32xlarge
+    - x1e.xlarge
+    - x1e.2xlarge
+    - x1e.4xlarge
+    - x1e.8xlarge
+    - x1e.16xlarge
+    - x1e.32xlarge
+    - d2.xlarge
+    - d2.2xlarge
+    - d2.4xlarge
+    - d2.8xlarge
+    - h1.2xlarge
+    - h1.4xlarge
+    - h1.8xlarge
+    - h1.16xlarge
+    - i3.large
+    - i3.xlarge
+    - i3.2xlarge
+    - i3.4xlarge
+    - i3.8xlarge
+    - i3.16xlarge
+    - f1.2xlarge
+    - f1.16xlarge
+    - g3.4xlarge
+    - g3.8xlarge
+    - g3.16xlarge
+    - p2.xlarge
+    - p2.8xlarge
+    - p2.16xlarge
+    - p3.2xlarge
+    - p3.8xlarge
+    - p3.16xlarge
   WorkerDiskSize:
     Description: Size of Manager's ephemeral storage volume in GiB
     Type: Number
@@ -147,8 +147,8 @@ Parameters:
     Type: String
     Default: gp2
     AllowedValues:
-      - standard
-      - gp2
+    - standard
+    - gp2
   EncryptionToken:
     NoEcho: true
     Description: 'Secret key to use for encryption of Consul network traffic. This key must be 16-bytes that are Base64-encoded'
@@ -185,108 +185,108 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Principal:
-              Service:
-                - "ec2.amazonaws.com"
-                - "autoscaling.amazonaws.com"
-            Action:
-              - "sts:AssumeRole"
+        -
+          Effect: "Allow"
+          Principal:
+            Service:
+            - "ec2.amazonaws.com"
+            - "autoscaling.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
       Path: /
 
   WorkerDynamoDBPolicy:
     DependsOn:
-      - SwarmWorkerRole
+    - SwarmWorkerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "swarm-worker-dynamodb-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "dynamodb:GetItem"
-            Resource:
-            - 'Fn::ImportValue': !Sub "${SwarmManagerStack}-SwarmTableArn"
+        -
+          Effect: "Allow"
+          Action:
+          - "dynamodb:GetItem"
+          Resource:
+          - 'Fn::ImportValue': !Sub "${SwarmManagerStack}-SwarmTableArn"
       Roles:
-        - !Ref SwarmWorkerRole
+      - !Ref SwarmWorkerRole
 
   WorkerEC2Policy:
     DependsOn:
-      - SwarmWorkerRole
+    - SwarmWorkerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "swarm-worker-ec2-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "ec2:CreateTags"
-              - "ec2:DescribeTags"
-              - "ec2:DescribeInstances"
-            Resource: "*"
+        -
+          Effect: "Allow"
+          Action:
+          - "ec2:CreateTags"
+          - "ec2:DescribeTags"
+          - "ec2:DescribeInstances"
+          Resource: "*"
       Roles:
-        - !Ref SwarmWorkerRole
+      - !Ref SwarmWorkerRole
 
   CertificateBucketPolicy:
     DependsOn:
-      - SwarmWorkerRole
+    - SwarmWorkerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "certificate-download-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "s3:ListBucket"
-            Resource:
-            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
-          -
-            Effect: "Allow"
-            Action:
-              - s3:ListObjects
-              - "s3:GetObject"
-            Resource:
-            - !Join ["", [ 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*" ] ]
+        -
+          Effect: "Allow"
+          Action:
+          - "s3:ListBucket"
+          Resource:
+          - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
+        -
+          Effect: "Allow"
+          Action:
+          - s3:ListObjects
+          - "s3:GetObject"
+          Resource:
+          - !Join ["", ['Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*"]]
 
       Roles:
-        - !Ref SwarmWorkerRole
+      - !Ref SwarmWorkerRole
 
   SwarmLifecycleQueuePolicy:
     DependsOn:
-      - SwarmWorkerRole
+    - SwarmWorkerRole
     Type: "AWS::IAM::Policy"
     Properties:
       PolicyName: "swarm-sqs-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "sqs:SendMessage"
-              - "sqs:GetQueueUrl"
-              - "sns:Publish"
-            Resource:
-              Fn::ImportValue:
-                !Sub "${SwarmManagerStack}-SwarmLifecycleQueue"
+        -
+          Effect: "Allow"
+          Action:
+          - "sqs:SendMessage"
+          - "sqs:GetQueueUrl"
+          - "sns:Publish"
+          Resource:
+            Fn::ImportValue:
+              !Sub "${SwarmManagerStack}-SwarmLifecycleQueue"
       Roles:
-        - !Ref SwarmWorkerRole
+      - !Ref SwarmWorkerRole
 
   SwarmWorkerInstanceProfile:
     DependsOn:
-      - SwarmWorkerRole
+    - SwarmWorkerRole
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
-        - !Ref SwarmWorkerRole
+      - !Ref SwarmWorkerRole
 
   SwarmWorkerLaunchConfiguration:
     Metadata:
@@ -295,22 +295,22 @@ Resources:
         CertificateAccessCreds:
           type: "S3"
           buckets:
-            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+          - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
           roleName:
             Ref: SwarmWorkerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
-            - install_cfn
-            - install_docker
-            - setup_logging
-            - certificates
-            - consul_config
-            - haproxy_config
-            - init_aws_swarm
-            - swarm_node_healthcheck
+          - install_cfn
+          - install_docker
+          - setup_logging
+          - certificates
+          - consul_config
+          - haproxy_config
+          - init_aws_swarm
+          - swarm_node_healthcheck
           update_install:
-            - install_cfn
+          - install_cfn
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -350,7 +350,7 @@ Resources:
                 enabled: 'true'
                 ensureRunning: 'true'
                 files:
-                  - "/etc/rsyslog.d/10-ship-syslog.conf"
+                - "/etc/rsyslog.d/10-ship-syslog.conf"
           files:
             /etc/rsyslog.d/10-ship-syslog.conf:
               content: |
@@ -425,12 +425,12 @@ Resources:
             /tmp/letsencrypt.tar.gz:
               source:
                 Fn::Join:
-                  - ""
-                  -
-                    - "https://"
-                    - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
-                    - ".s3.amazonaws.com"
-                    - "/letsencrypt.tar.gz"
+                - ""
+                -
+                  - "https://"
+                  - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+                  - ".s3.amazonaws.com"
+                  - "/letsencrypt.tar.gz"
               mode: "000644"
               owner: "root"
               group: "root"
@@ -606,7 +606,7 @@ Resources:
             docker_run:
               command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
               env:
-                DYNAMODB_TABLE: { "Fn::ImportValue" : { "Fn::Sub" : "${SwarmManagerStack}-SwarmTableName" } }
+                DYNAMODB_TABLE: {"Fn::ImportValue": {"Fn::Sub": "${SwarmManagerStack}-SwarmTableName"}}
               cwd: "~"
         swarm_node_healthcheck:
           commands:
@@ -614,22 +614,22 @@ Resources:
               command: "docker run --log-driver=fluentd -d --name swarm-healthcheck --restart=always -p 44444:44444 -v /var/run/docker.sock:/var/run/docker.sock bhavikk/swarm-node-healthcheck:latest"
               cwd: "~"
     DependsOn:
-      - SwarmWorkerInstanceProfile
+    - SwarmWorkerInstanceProfile
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
       BlockDeviceMappings:
-        - DeviceName: "/dev/xvda"
-          Ebs:
-            VolumeSize: !Ref WorkerDiskSize
-            VolumeType: !Ref WorkerDiskType
+      - DeviceName: "/dev/xvda"
+        Ebs:
+          VolumeSize: !Ref WorkerDiskSize
+          VolumeType: !Ref WorkerDiskType
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'WorkerInstanceType', Arch]]
       InstanceType: !Ref WorkerInstanceType
       IamInstanceProfile: !Ref SwarmWorkerInstanceProfile
       SecurityGroups:
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmClusterSecurityGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxySecurityGroup'
+      - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmClusterSecurityGroup'
+      - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulClusterSecurityGroup'
+      - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxySecurityGroup'
       UserData:
         "Fn::Base64":
           !Sub |
@@ -641,8 +641,8 @@ Resources:
 
   SwarmWorkerAutoScaleGroup:
     DependsOn:
-      - SwarmWorkerAsgNotification
-      - SwarmWorkerLaunchConfiguration
+    - SwarmWorkerAsgNotification
+    - SwarmWorkerLaunchConfiguration
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -662,34 +662,34 @@ Resources:
       HealthCheckGracePeriod: 300
       LaunchConfigurationName: !Ref SwarmWorkerLaunchConfiguration
       MetricsCollection:
-        - Granularity: 1Minute
+      - Granularity: 1Minute
       TargetGroupARNs:
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmHealthCheckTargetGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulTargetGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpTargetGroup'
-        - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpsTargetGroup'
+      - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-SwarmHealthCheckTargetGroup'
+      - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-ConsulTargetGroup'
+      - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpTargetGroup'
+      - 'Fn::ImportValue': !Sub '${SwarmManagerStack}-HAProxyHttpsTargetGroup'
       VPCZoneIdentifier:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+      - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
       NotificationConfigurations:
       - TopicARN:
           !Ref SwarmWorkerAsgNotification
         NotificationTypes:
-          - autoscaling:EC2_INSTANCE_LAUNCH
-          - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
-          - autoscaling:EC2_INSTANCE_TERMINATE
-          - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+        - autoscaling:EC2_INSTANCE_LAUNCH
+        - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+        - autoscaling:EC2_INSTANCE_TERMINATE
+        - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
       Tags:
-        -
-          Key: swarm-node-type
-          PropagateAtLaunch: true
-          Value: worker
+      -
+        Key: swarm-node-type
+        PropagateAtLaunch: true
+        Value: worker
 
   SwarmWorkerLifecycleHook:
     DependsOn:
-      - SwarmWorkerAutoScaleGroup
-      - SwarmWorkerRole
+    - SwarmWorkerAutoScaleGroup
+    - SwarmWorkerRole
     Type: AWS::AutoScaling::LifecycleHook
     Properties:
       AutoScalingGroupName: !Ref SwarmWorkerAutoScaleGroup

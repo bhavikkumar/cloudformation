@@ -10,20 +10,20 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Allow Finance users to assume BillingAccessRole in any account
-          -
-            Effect: "Allow"
-            Action:
-              - "sts:AssumeRole"
-            Resource:
-              - "arn:aws:iam::*:role/BillingAccessRole"
+        # Allow Finance users to assume BillingAccessRole in any account
+        -
+          Effect: "Allow"
+          Action:
+          - "sts:AssumeRole"
+          Resource:
+          - "arn:aws:iam::*:role/BillingAccessRole"
 
   FinanceGroup:
     Type: "AWS::IAM::Group"
     Properties:
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/job-function/Billing"
-        - !Ref AssumeBillingAccessRolePolicy
+      - "arn:aws:iam::aws:policy/job-function/Billing"
+      - !Ref AssumeBillingAccessRolePolicy
 
 Outputs:
   BillingGroupName:

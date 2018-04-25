@@ -41,10 +41,10 @@ Resources:
       AccessControl: LogDeliveryWrite
       LifecycleConfiguration:
         Rules:
-          -
-            ExpirationInDays: 14
-            Id: DeleteInTwoWeeks
-            Status: Enabled
+        -
+          ExpirationInDays: 14
+          Id: DeleteInTwoWeeks
+          Status: Enabled
     DeletionPolicy: Retain
 
   TrailBucket:
@@ -55,17 +55,17 @@ Resources:
         DestinationBucketName: !Ref TrailAccessLogBucket
       LifecycleConfiguration:
         Rules:
+        -
+          ExpirationInDays: 3650
+          Id: DeleteInTenYears
+          Status: Enabled
+          Transitions:
           -
-            ExpirationInDays: 3650
-            Id: DeleteInTenYears
-            Status: Enabled
-            Transitions:
-              -
-                StorageClass: STANDARD_IA
-                TransitionInDays: 730
-              -
-                StorageClass: GLACIER
-                TransitionInDays: 1825
+            StorageClass: STANDARD_IA
+            TransitionInDays: 730
+          -
+            StorageClass: GLACIER
+            TransitionInDays: 1825
     DeletionPolicy: Retain
 
   TrailBucketPolicy:
@@ -89,10 +89,10 @@ Resources:
           Action: 's3:PutObject'
           # Extend this as required for the number of account ids. By default the current account is added
           Resource:
-            - !Sub 'arn:aws:s3:::${TrailBucket}/AWSLogs/${AWS::AccountId}/*'
-            - !Join [ "", [ !Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [0, !Ref AdditionalAccounts ], "/*" ] ]
-            - !Join [ "", [ !Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [1, !Ref AdditionalAccounts ], "/*" ] ]
-            - !Join [ "", [ !Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [2, !Ref AdditionalAccounts ], "/*" ] ]
+          - !Sub 'arn:aws:s3:::${TrailBucket}/AWSLogs/${AWS::AccountId}/*'
+          - !Join ["", [!Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [0, !Ref AdditionalAccounts], "/*"]]
+          - !Join ["", [!Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [1, !Ref AdditionalAccounts], "/*"]]
+          - !Join ["", [!Sub "arn:aws:s3:::${TrailBucket}/AWSLogs/", !Select [2, !Ref AdditionalAccounts], "/*"]]
           Condition:
             StringEquals:
               's3:x-amz-acl': 'bucket-owner-full-control'
@@ -108,13 +108,13 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          -
-            Effect: Allow
-            Principal:
-              Service:
-                - 'cloudtrail.amazonaws.com'
-            Action:
-              - 'sts:AssumeRole'
+        -
+          Effect: Allow
+          Principal:
+            Service:
+            - 'cloudtrail.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
       Policies:
       -
         PolicyName: 'cloudtrail-policy'
@@ -160,64 +160,64 @@ Resources:
         Version: "2012-10-17"
         Id: "key-default-1"
         Statement:
-          -
-            Sid: "Allow alias creation"
-            Effect: "Allow"
-            Principal:
-              AWS: [
-                "*"
-              ]
-            Action:
-              - "kms:CreateAlias"
-            Resource: "*"
-            Condition:
-              StringEquals:
-                'kms:ViaService': !Sub 'ec2.${AWS::Region}.amazonaws.com'
-                'kms:CallerAccount': !Sub '${AWS::AccountId}'
-          -
-            Sid: "Allow administration of the key"
-            Effect: "Allow"
-            Principal:
-              AWS: [
-                !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-              ]
-            Action:
-              - "kms:Create*"
-              - "kms:Describe*"
-              - "kms:Enable*"
-              - "kms:List*"
-              - "kms:Put*"
-              - "kms:Update*"
-              - "kms:Revoke*"
-              - "kms:Disable*"
-              - "kms:Get*"
-              - "kms:Delete*"
-              - "kms:ScheduleKeyDeletion"
-              - "kms:CancelKeyDeletion"
-            Resource: "*"
-          -
-            Sid: "Allow CloudTrail to describe the key"
-            Effect: "Allow"
-            Principal:
-              Service: "cloudtrail.amazonaws.com"
-            Action:
-              - "kms:DescribeKey"
-            Resource: "*"
-          -
-            Sid: "Allow CloudTrail to encrypt logs"
-            Effect: "Allow"
-            Principal:
-              Service: "cloudtrail.amazonaws.com"
-            Action:
-              - "kms:GenerateDataKey*"
-            Resource: "*"
-            Condition:
-              StringLike:
-                kms:EncryptionContext:aws:cloudtrail:arn:
-                  - !Sub 'arn:aws:cloudtrail:*:${AWS::AccountId}:trail/*'
-                  - !Join [ "", [ "arn:aws:cloudtrail:*:", !Select [0, !Ref AdditionalAccounts ], ":trail/*" ] ]
-                  - !Join [ "", [ "arn:aws:cloudtrail:*:", !Select [1, !Ref AdditionalAccounts ], ":trail/*" ] ]
-                  - !Join [ "", [ "arn:aws:cloudtrail:*:", !Select [2, !Ref AdditionalAccounts ], ":trail/*" ] ]
+        -
+          Sid: "Allow alias creation"
+          Effect: "Allow"
+          Principal:
+            AWS: [
+              "*"
+            ]
+          Action:
+          - "kms:CreateAlias"
+          Resource: "*"
+          Condition:
+            StringEquals:
+              'kms:ViaService': !Sub 'ec2.${AWS::Region}.amazonaws.com'
+              'kms:CallerAccount': !Sub '${AWS::AccountId}'
+        -
+          Sid: "Allow administration of the key"
+          Effect: "Allow"
+          Principal:
+            AWS: [
+              !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            ]
+          Action:
+          - "kms:Create*"
+          - "kms:Describe*"
+          - "kms:Enable*"
+          - "kms:List*"
+          - "kms:Put*"
+          - "kms:Update*"
+          - "kms:Revoke*"
+          - "kms:Disable*"
+          - "kms:Get*"
+          - "kms:Delete*"
+          - "kms:ScheduleKeyDeletion"
+          - "kms:CancelKeyDeletion"
+          Resource: "*"
+        -
+          Sid: "Allow CloudTrail to describe the key"
+          Effect: "Allow"
+          Principal:
+            Service: "cloudtrail.amazonaws.com"
+          Action:
+          - "kms:DescribeKey"
+          Resource: "*"
+        -
+          Sid: "Allow CloudTrail to encrypt logs"
+          Effect: "Allow"
+          Principal:
+            Service: "cloudtrail.amazonaws.com"
+          Action:
+          - "kms:GenerateDataKey*"
+          Resource: "*"
+          Condition:
+            StringLike:
+              kms:EncryptionContext:aws:cloudtrail:arn:
+              - !Sub 'arn:aws:cloudtrail:*:${AWS::AccountId}:trail/*'
+              - !Join ["", ["arn:aws:cloudtrail:*:", !Select [0, !Ref AdditionalAccounts], ":trail/*"]]
+              - !Join ["", ["arn:aws:cloudtrail:*:", !Select [1, !Ref AdditionalAccounts], ":trail/*"]]
+              - !Join ["", ["arn:aws:cloudtrail:*:", !Select [2, !Ref AdditionalAccounts], ":trail/*"]]
 
   # Create KMS Key for CloudTrail
   TrailKeyAlias:

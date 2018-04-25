@@ -21,18 +21,18 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          -
-            Effect: Allow
-            Principal:
-              AWS:
-                  - !Join ['', [ 'arn:aws:iam::', !Ref TrustedAccount, ':root' ] ]
-            Action:
-              - 'sts:AssumeRole'
-            Condition:
-              BoolIfExists:
-                aws:MultiFactorAuthPresent: true
+        -
+          Effect: Allow
+          Principal:
+            AWS:
+            - !Join ['', ['arn:aws:iam::', !Ref TrustedAccount, ':root']]
+          Action:
+          - 'sts:AssumeRole'
+          Condition:
+            BoolIfExists:
+              aws:MultiFactorAuthPresent: true
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
+      - arn:aws:iam::aws:policy/AdministratorAccess
       RoleName: 'EngineerAccessRole'
 
 

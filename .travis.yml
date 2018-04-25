@@ -1,0 +1,30 @@
+---
+language: python
+env:
+  global:
+  - AWS_DEFAULT_REGION=us-west-2
+  - secure: PY5OHXIHJU3ZH5ZDoQZpTiSQEMjtWXd6mzELXu94WdCgLHL2VL7FE7Vd+Uq7MKK21VqdmZD5aRQwOKg2NYP4dK9tW+eFdcceLDMLiV8cBXVDhXiykdRoukpcG5oCDNmLml1dx+gY2G8S9E04Dfr7Iyx4E5RgfVu6JBRh7k8iIX6jUQfr4UyXQ6sCLGCXwyaS+SQuu3V+nl9dM4L4O8cvAkaTnoQHI/lqet3YjLYkDH4xrJRRiMOig6gkbYg2r1+Q/mK81FTd3MlsoYP+9T5VfQKrW+kC4CFPWQ2nfoxRlWRxjOr0CuG6OvZa2fZbrJPrYRi6hdPt8eU+R9e4rDyEOVJ6r+zCl/EHHWjLUi52i0Z0E8adVjeM3sFT12NpDBv6kw2UvNOIjGgueTQRYPXSqzbH0pybjKyI/aLBzEv9AfjEzc6tWAKVIR2XobhPJNFgj6RDZhI/eGJDRsQ3aMHhFaRHv7KvZdkrXH5rFTswkldfssd7ZodqG1WPgMzHHj9wuRw29bLR8ZQWRPcJvDz4C+LI0WsQYwG6wpQb/N3slsKGVXQurkjwuFZHu+u9W3FETsFuwkzZENRWx068xaAX9smNdZLojV2vINx1M2992RjpGu//LVK4v8k3c2ZPFPvqt4Z3WNE3Ssl9dG7p4WAgK5qDv6OBfT74kz+avHo9Y4s=
+  - secure: gM8jXHKEekDFOQXqfW9mud6SanedibsR6dabQwFN2vo+8sE7XT4o+HUfGUJfKk9xhfUFzQ4hAfnYoDPZPCBFxMT+7ZOinIbeXF7YiICdJEH2GwK3OMBSKFmQ2XyvDlvel2rFjlFG5Tc6Dk5uU8veuXcr+1uGp4Ot72zYEYpnsKgClRpC3vN1JXkGNr3lGDo3GLQuiEgmGo1IjplIGjAxkB7cY1tUpKUR4czoFVW/BPesabHmsNN8lwsdeLnLH8BDpOXkaI/6mmcC/ITWGERej8cIV6pbAJw1zbOTEbp6yA6hbkVXrZErWy/6kxRglP6eCaKPlv6/0zB6N4gCh0u80vQLxwoBbAm1Wn6ujPk2NLLercICgfg5wqnCWvW9cREKcSIXUfiBsftWXig+ZH+RpxGvcjs/S771Yan5Dd+FOD4WHck19NtYBEe0wuNitcMFjtXeAvtc45ygHuWIKY7wXHTuY6qSSF64hhwan3zQvtrcA/m4uVat3qodWLTpfZHZPuqoz7hyPVJqkxvU2jOviqbaZLCOH5QP+kIAEQK3/Cgema1+DpjOItBrcHNj9t8B6j1np1v0JyuUeXNLkN8KKjaGe4kWcPsrs6ssDBJsxnK22mQpAKePsT6USb8BiOWE0/p7FB911Gde/avjzk9kvIM0fKCwcGm/kA8lkyjIlS8=
+
+python:
+- 2.7
+
+install:
+- pip install awscli
+- pip install yamllint
+
+script:
+- yamllint .
+- if [[ $TRAVIS_PULL_REQUEST == "true" ]]; then find . -type f -name '*.y?ml' | while
+  read file; do set -ex && aws s3 cp "$file" "s3://cf-templates-depost/$TRAVIS_BRANCH/$file"
+  && aws cloudformation validate-template --template-url "https://s3.amazonaws.com/cf-templates-depost/$TRAVIS_BRANCH/$file"
+  > /dev/null; done; fi
+- if [[ $TRAVIS_PULL_REQUEST == "false" ]] && [[ $TRAVIS_BRANCH == "master" ]]; then
+  find . -type f -name '*.y?ml' | while read file; do set -ex && aws s3 cp "$file"
+  "s3://cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file" && aws cloudformation validate-template
+  --template-url "https://s3.amazonaws.com/cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file"
+  > /dev/null; done; fi
+
+after_success:
+- if [[ $TRAVIS_PULL_REQUEST == "true" ]]; then aws s3 rm --recursive s3://cf-templates-depost/$TRAVIS_BRANCH;
+  fi

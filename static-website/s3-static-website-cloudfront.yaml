@@ -1,3 +1,4 @@
+---
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
  CloudFront Static Website with S3 origin
@@ -26,7 +27,7 @@ Metadata:
     - Label:
         default: Cloudwatch Alarm Activity
       Parameters:
-        - NotificationEmail
+      - NotificationEmail
     - Label:
         default: 'CloudFront CDN'
       Parameters:
@@ -88,9 +89,9 @@ Parameters:
     Description: "Distribution price class. Default is US-only, PriceClass_All is worldwide but more expensive."
     Default: PriceClass_100
     AllowedValues:
-      - PriceClass_100
-      - PriceClass_200
-      - PriceClass_All
+    - PriceClass_100
+    - PriceClass_200
+    - PriceClass_All
     Type: String
   PreExistingSiteBucket:
     Description: "Optional name of pre-existing website bucket. Leave empty to have website bucket created and managed by this stack."
@@ -137,37 +138,37 @@ Resources:
   # IAM Policy for Build User
   BuildUserPolicy:
     Type: 'AWS::IAM::Policy'
-    DependsOn : BuildUser
+    DependsOn: BuildUser
     Properties:
       PolicyName: !Sub '${AWS::StackName}-BuildUser-Policy'
       Users:
-        - !Ref BuildUser
+      - !Ref BuildUser
       PolicyDocument:
         Statement:
-          -
-            Effect: 'Allow'
-            Action:
-              - 's3:ListAllMyBuckets'
-            Resource: 'arn:aws:s3:::*'
-          -
-            Effect: 'Allow'
-            Action:
-              - 's3:CreateBucket'
-              - 's3:PutObject'
-            Resource:
-            - !Join ["", ["arn:aws:s3:::", !If [NeedsNewSiteBucket, !Ref WebsiteBucket, !Ref PreExistingSiteBucket]]]
-          -
-            Effect: 'Allow'
-            Action:
-              - 's3:CreateBucket'
-              - 's3:PutObject'
-            Resource:
-            - !Join ["", ["arn:aws:s3:::", !If [NeedsNewSiteBucket, !Ref WebsiteBucket, !Ref PreExistingSiteBucket], "/*"]]
+        -
+          Effect: 'Allow'
+          Action:
+          - 's3:ListAllMyBuckets'
+          Resource: 'arn:aws:s3:::*'
+        -
+          Effect: 'Allow'
+          Action:
+          - 's3:CreateBucket'
+          - 's3:PutObject'
+          Resource:
+          - !Join ["", ["arn:aws:s3:::", !If [NeedsNewSiteBucket, !Ref WebsiteBucket, !Ref PreExistingSiteBucket]]]
+        -
+          Effect: 'Allow'
+          Action:
+          - 's3:CreateBucket'
+          - 's3:PutObject'
+          Resource:
+          - !Join ["", ["arn:aws:s3:::", !If [NeedsNewSiteBucket, !Ref WebsiteBucket, !Ref PreExistingSiteBucket], "/*"]]
 
   # AWS Access and Secret Keys
   BuildCredentials:
     Type: 'AWS::IAM::AccessKey'
-    DependsOn : BuildUser
+    DependsOn: BuildUser
     Properties:
       UserName: !Ref BuildUser
 
@@ -185,30 +186,30 @@ Resources:
       DistributionConfig:
         Enabled: true
         Aliases:
-          - !Ref DomainName
+        - !Ref DomainName
         DefaultRootObject: !Ref IndexPage
         PriceClass: !Ref PriceClass
         HttpVersion: http2
         Origins:
-          -
-            DomainName: !Join ["", [!Ref DomainName, ".", !FindInMap [RegionMap, !Ref "AWS::Region", websiteendpoint]]]
-            Id: S3Origin
-            CustomOriginConfig:
-              HTTPPort: 80
-              HTTPSPort: 443
-              OriginProtocolPolicy: http-only
+        -
+          DomainName: !Join ["", [!Ref DomainName, ".", !FindInMap [RegionMap, !Ref "AWS::Region", websiteendpoint]]]
+          Id: S3Origin
+          CustomOriginConfig:
+            HTTPPort: 80
+            HTTPSPort: 443
+            OriginProtocolPolicy: http-only
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           AllowedMethods:
-            - GET
-            - HEAD
+          - GET
+          - HEAD
           Compress: false
           DefaultTTL: !Ref DefaultTTL
           MinTTL: !Ref MinimumTTL
           ForwardedValues:
             QueryString: false
             Cookies:
-             Forward: none
+            Forward: none
           ViewerProtocolPolicy: redirect-to-https
         Logging:
           Bucket: !Join ['', [!If [NeedsNewLogsBucket, !Ref LogsBucket, !Ref PreExistingLogsBucket], '.s3.amazonaws.com']]
@@ -218,18 +219,18 @@ Resources:
           AcmCertificateArn: !Ref Certificate
           SslSupportMethod: sni-only
 
-  # DNS record: example.com
   Route53RecordSetGroup:
     Type: "AWS::Route53::RecordSetGroup"
     DependsOn: CloudFrontDistribution
     Properties:
-      HostedZoneId: { "Fn::ImportValue" :  {"Fn::Sub": "${HostedZoneStackName}-HostedZoneId" } }
+      HostedZoneId:
+        'Fn::ImportValue': !Sub '${HostedZoneStackName}-HostedZoneId'
       RecordSets:
-        - Name: !Sub "${DomainName}."
-          Type: A
-          AliasTarget:
-            HostedZoneId: Z2FDTNDATAQYW2 # CloudFront
-            DNSName: !GetAtt CloudFrontDistribution.DomainName
+      - Name: !Sub "${DomainName}."
+        Type: A
+        AliasTarget:
+          HostedZoneId: Z2FDTNDATAQYW2 # CloudFront
+          DNSName: !GetAtt CloudFrontDistribution.DomainName
 
   # SNS topic for Cloudwatch Alarm activity. Email subscription
   NotificationTopic:
@@ -238,16 +239,18 @@ Resources:
     Properties:
       DisplayName: !Sub "Activity in ${DomainName} CloudFront Distribution"
       Subscription:
-        - Endpoint: !Ref NotificationEmail
-          Protocol: email
+      - Endpoint: !Ref NotificationEmail
+        Protocol: email
 
   # CLoudfront 4XX Error Alarm
   CloudFront4XXAlarm:
     Type: "AWS::CloudWatch::Alarm"
-    DependsOn: [ NotificationTopic, CloudFrontDistribution ]
+    DependsOn:
+    - NotificationTopic
+    - CloudFrontDistribution
     Properties:
       AlarmActions:
-        - Ref: NotificationTopic
+      - Ref: NotificationTopic
       AlarmDescription: 'CloudFront 4XXs Error Rate'
       ComparisonOperator: 'GreaterThanThreshold'
       Namespace: 'AWS/CloudFront'
@@ -267,10 +270,12 @@ Resources:
   # CLoudfront 5XX Error Alarm
   CloudFront5XXAlarm:
     Type: "AWS::CloudWatch::Alarm"
-    DependsOn: [ NotificationTopic, CloudFrontDistribution ]
+    DependsOn:
+    - NotificationTopic
+    - CloudFrontDistribution
     Properties:
       AlarmActions:
-        - Ref: NotificationTopic
+      - Ref: NotificationTopic
       AlarmDescription: 'CloudFront 5XXs Error Rate'
       ComparisonOperator: 'GreaterThanThreshold'
       Namespace: 'AWS/CloudFront'

@@ -58,84 +58,84 @@ Parameters:
     Default: 3
     Type: Number
     AllowedValues:
-      - 1
-      - 3
-      - 5
-      - 7
+    - 1
+    - 3
+    - 5
+    - 7
   ManagerInstanceType:
     Description: Swarm manager EC2 instance type
     Type: String
     Default: t2.micro
     AllowedValues:
-      - t2.nano
-      - t2.micro
-      - t2.small
-      - t2.medium
-      - t2.large
-      - t2.xlarge
-      - t2.2xlarge
-      - m4.large
-      - m4.xlarge
-      - m4.2xlarge
-      - m4.4xlarge
-      - m4.10xlarge
-      - m4.16xlarge
-      - m5.large
-      - m5.xlarge
-      - m5.2xlarge
-      - m5.4xlarge
-      - m5.12xlarge
-      - m5.24xlarge
-      - c4.large
-      - c4.xlarge
-      - c4.2xlarge
-      - c4.4xlarge
-      - c4.8xlarge
-      - c5.large
-      - c5.xlarge
-      - c5.2xlarge
-      - c5.4xlarge
-      - c5.9xlarge
-      - c5.18xlarge
-      - r4.large
-      - r4.xlarge
-      - r4.2xlarge
-      - r4.4xlarge
-      - r4.8xlarge
-      - r4.16xlarge
-      - x1.16xlarge
-      - x1.32xlarge
-      - x1e.xlarge
-      - x1e.2xlarge
-      - x1e.4xlarge
-      - x1e.8xlarge
-      - x1e.16xlarge
-      - x1e.32xlarge
-      - d2.xlarge
-      - d2.2xlarge
-      - d2.4xlarge
-      - d2.8xlarge
-      - h1.2xlarge
-      - h1.4xlarge
-      - h1.8xlarge
-      - h1.16xlarge
-      - i3.large
-      - i3.xlarge
-      - i3.2xlarge
-      - i3.4xlarge
-      - i3.8xlarge
-      - i3.16xlarge
-      - f1.2xlarge
-      - f1.16xlarge
-      - g3.4xlarge
-      - g3.8xlarge
-      - g3.16xlarge
-      - p2.xlarge
-      - p2.8xlarge
-      - p2.16xlarge
-      - p3.2xlarge
-      - p3.8xlarge
-      - p3.16xlarge
+    - t2.nano
+    - t2.micro
+    - t2.small
+    - t2.medium
+    - t2.large
+    - t2.xlarge
+    - t2.2xlarge
+    - m4.large
+    - m4.xlarge
+    - m4.2xlarge
+    - m4.4xlarge
+    - m4.10xlarge
+    - m4.16xlarge
+    - m5.large
+    - m5.xlarge
+    - m5.2xlarge
+    - m5.4xlarge
+    - m5.12xlarge
+    - m5.24xlarge
+    - c4.large
+    - c4.xlarge
+    - c4.2xlarge
+    - c4.4xlarge
+    - c4.8xlarge
+    - c5.large
+    - c5.xlarge
+    - c5.2xlarge
+    - c5.4xlarge
+    - c5.9xlarge
+    - c5.18xlarge
+    - r4.large
+    - r4.xlarge
+    - r4.2xlarge
+    - r4.4xlarge
+    - r4.8xlarge
+    - r4.16xlarge
+    - x1.16xlarge
+    - x1.32xlarge
+    - x1e.xlarge
+    - x1e.2xlarge
+    - x1e.4xlarge
+    - x1e.8xlarge
+    - x1e.16xlarge
+    - x1e.32xlarge
+    - d2.xlarge
+    - d2.2xlarge
+    - d2.4xlarge
+    - d2.8xlarge
+    - h1.2xlarge
+    - h1.4xlarge
+    - h1.8xlarge
+    - h1.16xlarge
+    - i3.large
+    - i3.xlarge
+    - i3.2xlarge
+    - i3.4xlarge
+    - i3.8xlarge
+    - i3.16xlarge
+    - f1.2xlarge
+    - f1.16xlarge
+    - g3.4xlarge
+    - g3.8xlarge
+    - g3.16xlarge
+    - p2.xlarge
+    - p2.8xlarge
+    - p2.16xlarge
+    - p3.2xlarge
+    - p3.8xlarge
+    - p3.16xlarge
   ManagerDiskSize:
     Description: Size of Manager's ephemeral storage volume in GiB
     Type: Number
@@ -147,8 +147,8 @@ Parameters:
     Type: String
     Default: gp2
     AllowedValues:
-      - standard
-      - gp2
+    - standard
+    - gp2
   EncryptionToken:
     NoEcho: true
     Description: 'Secret key to use for encryption of Consul network traffic. This key must be 16-bytes that are Base64-encoded'
@@ -331,33 +331,33 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       AttributeDefinitions:
-        -
-          AttributeName: id
-          AttributeType: S
+      -
+        AttributeName: id
+        AttributeType: S
       KeySchema:
-        -
-          AttributeName: id
-          KeyType: HASH
+      -
+        AttributeName: id
+        KeyType: HASH
       ProvisionedThroughput:
         ReadCapacityUnits: 1
         WriteCapacityUnits: 1
-      TableName: !Join ['-', [ !Ref "AWS::StackName", dockerswarm ] ]
+      TableName: !Join ['-', [!Ref "AWS::StackName", dockerswarm]]
 
   VaultDynamoDBTable:
     Type: AWS::DynamoDB::Table
     Properties:
       AttributeDefinitions:
-        -
-          AttributeName: id
-          AttributeType: S
+      -
+        AttributeName: id
+        AttributeType: S
       KeySchema:
-        -
-          AttributeName: id
-          KeyType: HASH
+      -
+        AttributeName: id
+        KeyType: HASH
       ProvisionedThroughput:
         ReadCapacityUnits: 1
         WriteCapacityUnits: 1
-      TableName: !Join ['-', [ !Ref "AWS::StackName", vault ] ]
+      TableName: !Join ['-', [!Ref "AWS::StackName", vault]]
 
   SwarmManagerRole:
     Type: AWS::IAM::Role
@@ -365,98 +365,97 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Principal:
-              Service:
-                - "ec2.amazonaws.com"
-                - "autoscaling.amazonaws.com"
-            Action:
-              - "sts:AssumeRole"
+        -
+          Effect: "Allow"
+          Principal:
+            Service:
+            - "ec2.amazonaws.com"
+            - "autoscaling.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
       Path: /
 
   ManagerDynamoDBPolicy:
     DependsOn:
-      - SwarmManagerRole
+    - SwarmManagerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "swarm-manager-dynamodb-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "dynamodb:GetItem"
-              - "dynamodb:UpdateItem"
-              - "dynamodb:PutItem"
-              - "dynamodb:DeleteItem"
-            Resource: !GetAtt SwarmDynamoDBTable.Arn
+        -
+          Effect: "Allow"
+          Action:
+          - "dynamodb:GetItem"
+          - "dynamodb:UpdateItem"
+          - "dynamodb:PutItem"
+          - "dynamodb:DeleteItem"
+          Resource: !GetAtt SwarmDynamoDBTable.Arn
       Roles:
-        - !Ref SwarmManagerRole
+      - !Ref SwarmManagerRole
 
   VaultDynamoDBPolicy:
     DependsOn:
-      - SwarmManagerRole
+    - SwarmManagerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "vault-dynamodb-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "dynamodb:GetItem"
-              - "dynamodb:PutItem"
-            Resource: !GetAtt VaultDynamoDBTable.Arn
+        -
+          Effect: "Allow"
+          Action:
+          - "dynamodb:GetItem"
+          - "dynamodb:PutItem"
+          Resource: !GetAtt VaultDynamoDBTable.Arn
       Roles:
-        - !Ref SwarmManagerRole
+      - !Ref SwarmManagerRole
 
   ManagerEC2Policy:
     DependsOn:
-      - SwarmManagerRole
+    - SwarmManagerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "swarm-manager-ec2-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "ec2:CreateTags"
-              - "ec2:DescribeTags"
-              - "ec2:DescribeInstances"
-            Resource: "*"
+        -
+          Effect: "Allow"
+          Action:
+          - "ec2:CreateTags"
+          - "ec2:DescribeTags"
+          - "ec2:DescribeInstances"
+          Resource: "*"
       Roles:
-        - !Ref SwarmManagerRole
+      - !Ref SwarmManagerRole
 
   CertificateBucketPolicy:
     DependsOn:
-      - SwarmManagerRole
+    - SwarmManagerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "certificate-download-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "s3:ListBucket"
-            Resource:
-            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
-          -
-            Effect: "Allow"
-            Action:
-              - s3:ListObjects
-              - "s3:GetObject"
-            Resource:
-            - !Join ["", [ 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*" ] ]
-
+        -
+          Effect: "Allow"
+          Action:
+          - "s3:ListBucket"
+          Resource:
+          - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
+        -
+          Effect: "Allow"
+          Action:
+          - s3:ListObjects
+          - "s3:GetObject"
+          Resource:
+          - !Join ["", ['Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*"]]
       Roles:
-        - !Ref SwarmManagerRole
+      - !Ref SwarmManagerRole
 
   SwarmLifecycleQueue:
     Type: AWS::SQS::Queue
@@ -466,34 +465,34 @@ Resources:
 
   SwarmLifecycleQueuePolicy:
     DependsOn:
-      - SwarmLifecycleQueue
-      - SwarmManagerRole
+    - SwarmLifecycleQueue
+    - SwarmManagerRole
     Type: "AWS::IAM::Policy"
     Properties:
       PolicyName: "swarm-sqs-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "sqs:DeleteMessage"
-              - "sqs:ReceiveMessage"
-              - "sqs:SendMessage"
-              - "sqs:GetQueueUrl"
-              - "sns:Publish"
-            Resource: !GetAtt SwarmLifecycleQueue.Arn
+        -
+          Effect: "Allow"
+          Action:
+          - "sqs:DeleteMessage"
+          - "sqs:ReceiveMessage"
+          - "sqs:SendMessage"
+          - "sqs:GetQueueUrl"
+          - "sns:Publish"
+          Resource: !GetAtt SwarmLifecycleQueue.Arn
       Roles:
-        - !Ref SwarmManagerRole
+      - !Ref SwarmManagerRole
 
   SwarmManagerInstanceProfile:
     DependsOn:
-      - SwarmManagerRole
+    - SwarmManagerRole
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
-        - !Ref SwarmManagerRole
+      - !Ref SwarmManagerRole
 
   # This is used to health check the swarm cluster. We don't actually
   # allow any traffic to hit this.
@@ -624,24 +623,24 @@ Resources:
         CertificateAccessCreds:
           type: "S3"
           buckets:
-            - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+          - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
           roleName:
             Ref: SwarmManagerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
-            - install_cfn
-            - install_docker
-            - setup_logging
-            - init_aws_swarm
-            - swarm_node_healthcheck
-            - guide_aws_swarm
-            - certificates
-            - consul
-            - vault
-            - haproxy
+          - install_cfn
+          - install_docker
+          - setup_logging
+          - init_aws_swarm
+          - swarm_node_healthcheck
+          - guide_aws_swarm
+          - certificates
+          - consul
+          - vault
+          - haproxy
           update_install:
-            - install_cfn
+          - install_cfn
         install_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
@@ -681,7 +680,7 @@ Resources:
                 enabled: 'true'
                 ensureRunning: 'true'
                 files:
-                  - "/etc/rsyslog.d/10-ship-syslog.conf"
+                - "/etc/rsyslog.d/10-ship-syslog.conf"
           files:
             /etc/rsyslog.d/10-ship-syslog.conf:
               content: |
@@ -756,12 +755,12 @@ Resources:
             /tmp/letsencrypt.tar.gz:
               source:
                 Fn::Join:
-                  - ""
-                  -
-                    - "https://"
-                    - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
-                    - ".s3.amazonaws.com"
-                    - "/letsencrypt.tar.gz"
+                - ""
+                -
+                  - "https://"
+                  - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+                  - ".s3.amazonaws.com"
+                  - "/letsencrypt.tar.gz"
               mode: "000644"
               owner: "root"
               group: "root"
@@ -784,7 +783,7 @@ Resources:
             docker_run:
               command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/init-aws-swarm:latest"
               env:
-                DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
+                DYNAMODB_TABLE: {"Ref": "SwarmDynamoDBTable"}
               cwd: "~"
         swarm_node_healthcheck:
           commands:
@@ -796,8 +795,8 @@ Resources:
             docker_run:
               command: "docker run --log-driver=fluentd -d --name guide-aws --restart=always -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e LIFECYCLE_QUEUE=$LIFECYCLE_QUEUE -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker bhavikk/guide-aws-swarm:latest"
               env:
-                DYNAMODB_TABLE: { "Ref" : "SwarmDynamoDBTable" }
-                LIFECYCLE_QUEUE: { "Ref" : "SwarmLifecycleQueue" }
+                DYNAMODB_TABLE: {"Ref": "SwarmDynamoDBTable"}
+                LIFECYCLE_QUEUE: {"Ref": "SwarmLifecycleQueue"}
               cwd: "~"
         consul:
           files:
@@ -945,10 +944,10 @@ Resources:
             init_consul_acls:
               command: "docker run --log-driver=fluentd --name init-consul-acl --restart=no -e AGENT_ACL_TOKEN=$AGENT_TOKEN -e VAULT_ACL_TOKEN=$VAULT_TOKEN -e READ_ONLY_ACL_TOKEN=$READONLY_TOKEN -e CONSUL_HTTP_TOKEN=$MASTER_TOKEN -e CONSUL_HTTP_SSL=true -e CONSUL_HTTP_ADDR=`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8500 -e CONSUL_HTTP_SSL_VERIFY=false bhavikk/init-consul-acl:latest"
               env:
-                MASTER_TOKEN: { "Ref" : "ConsulACLMasterToken" }
-                AGENT_TOKEN: { "Ref" : "ConsulACLAgentToken" }
-                VAULT_TOKEN: { "Ref" : "ConsulACLVaultToken" }
-                READONLY_TOKEN: { "Ref" : "ConsulACLReadToken" }
+                MASTER_TOKEN: {"Ref": "ConsulACLMasterToken"}
+                AGENT_TOKEN: {"Ref": "ConsulACLAgentToken"}
+                VAULT_TOKEN: {"Ref": "ConsulACLVaultToken"}
+                READONLY_TOKEN: {"Ref": "ConsulACLReadToken"}
               cwd: "~"
         vault:
           files:
@@ -984,7 +983,7 @@ Resources:
             init_vault:
               command: "docker run --log-driver=fluentd --name init-vault --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e VAULT_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -e VAULT_SKIP_VERIFY=true bhavikk/init-vault:latest"
               env:
-                DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
+                DYNAMODB_TABLE: {"Ref": "VaultDynamoDBTable"}
               cwd: "~"
         haproxy:
           files:
@@ -1046,29 +1045,29 @@ Resources:
               cwd: "~"
               ignoreErrors: true
     DependsOn:
-      - PrivateDNS
-      - SwarmDynamoDBTable
-      - VaultDynamoDBTable
-      - SwarmManagerInstanceProfile
-      - SwarmClusterSecurityGroup
-      - ConsulClusterSecurityGroup
-      - VaultClusterSecurityGroup
+    - PrivateDNS
+    - SwarmDynamoDBTable
+    - VaultDynamoDBTable
+    - SwarmManagerInstanceProfile
+    - SwarmClusterSecurityGroup
+    - ConsulClusterSecurityGroup
+    - VaultClusterSecurityGroup
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
       BlockDeviceMappings:
-        - DeviceName: "/dev/xvda"
-          Ebs:
-            VolumeSize: !Ref ManagerDiskSize
-            VolumeType: !Ref ManagerDiskType
+      - DeviceName: "/dev/xvda"
+        Ebs:
+          VolumeSize: !Ref ManagerDiskSize
+          VolumeType: !Ref ManagerDiskType
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'ManagerInstanceType', Arch]]
       InstanceType: !Ref ManagerInstanceType
       IamInstanceProfile: !Ref SwarmManagerInstanceProfile
       KeyName: !Ref KeyName
       SecurityGroups:
-        - !Ref SwarmClusterSecurityGroup
-        - !Ref ConsulClusterSecurityGroup
-        - !Ref VaultClusterSecurityGroup
+      - !Ref SwarmClusterSecurityGroup
+      - !Ref ConsulClusterSecurityGroup
+      - !Ref VaultClusterSecurityGroup
       UserData:
         "Fn::Base64":
           !Sub |
@@ -1080,12 +1079,12 @@ Resources:
 
   SwarmManagerAutoScaleGroup:
     DependsOn:
-      - SwarmManagerAsgNotification
-      - SwarmManagerLaunchConfiguration
-      - SwarmHealthCheckTargetGroup
-      - ConsulTargetGroup
-      - ConsulExternalTargetGroup
-      - VaultTargetGroup
+    - SwarmManagerAsgNotification
+    - SwarmManagerLaunchConfiguration
+    - SwarmHealthCheckTargetGroup
+    - ConsulTargetGroup
+    - ConsulExternalTargetGroup
+    - VaultTargetGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
       ResourceSignal:
@@ -1105,61 +1104,61 @@ Resources:
       HealthCheckGracePeriod: 300
       LaunchConfigurationName: !Ref SwarmManagerLaunchConfiguration
       MetricsCollection:
-        - Granularity: 1Minute
+      - Granularity: 1Minute
       TargetGroupARNs:
-        - !Ref SwarmHealthCheckTargetGroup
-        - !Ref ConsulTargetGroup
-        - !Ref ConsulExternalTargetGroup
-        - !Ref VaultTargetGroup
-        - !Ref VaultExternalTargetGroup
+      - !Ref SwarmHealthCheckTargetGroup
+      - !Ref ConsulTargetGroup
+      - !Ref ConsulExternalTargetGroup
+      - !Ref VaultTargetGroup
+      - !Ref VaultExternalTargetGroup
       VPCZoneIdentifier:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+      - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
       NotificationConfigurations:
       - TopicARN:
           !Ref SwarmManagerAsgNotification
         NotificationTypes:
-          - autoscaling:EC2_INSTANCE_LAUNCH
-          - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
-          - autoscaling:EC2_INSTANCE_TERMINATE
-          - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+        - autoscaling:EC2_INSTANCE_LAUNCH
+        - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+        - autoscaling:EC2_INSTANCE_TERMINATE
+        - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
       Tags:
-        -
-          Key: swarm-node-type
-          PropagateAtLaunch: true
-          Value: manager
+      -
+        Key: swarm-node-type
+        PropagateAtLaunch: true
+        Value: manager
 
   InternalLoadBalancer:
     DependsOn:
-      - InternalLoadBalancerSecurityGroup
+    - InternalLoadBalancerSecurityGroup
     Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
     Properties:
       Scheme: internal
       SecurityGroups:
-        - !Ref InternalLoadBalancerSecurityGroup
+      - !Ref InternalLoadBalancerSecurityGroup
       Subnets:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+      - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
 
   ExternalLoadBalancer:
     DependsOn:
-      - HAProxySecurityGroup
+    - HAProxySecurityGroup
     Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
     Properties:
       Scheme: internet-facing
       SecurityGroups:
-        - !Ref ExternalLoadBalancerSecurityGroup
+      - !Ref ExternalLoadBalancerSecurityGroup
       Subnets:
-        - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
-        - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"] ]
+      - !Select [0, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
+      - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
 
   SwarmHealthCheckHttpListener:
     DependsOn:
-      - SwarmHealthCheckTargetGroup
-      - InternalLoadBalancer
+    - SwarmHealthCheckTargetGroup
+    - InternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
@@ -1171,8 +1170,8 @@ Resources:
 
   ConsulUiHttpListener:
     DependsOn:
-      - ConsulTargetGroup
-      - InternalLoadBalancer
+    - ConsulTargetGroup
+    - InternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
@@ -1188,8 +1187,8 @@ Resources:
 
   ConsulUiExternalHttpListener:
     DependsOn:
-      - ConsulExternalTargetGroup
-      - ExternalLoadBalancer
+    - ConsulExternalTargetGroup
+    - ExternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
@@ -1205,8 +1204,8 @@ Resources:
 
   VaultHttpListener:
     DependsOn:
-      - VaultTargetGroup
-      - InternalLoadBalancer
+    - VaultTargetGroup
+    - InternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
@@ -1222,8 +1221,8 @@ Resources:
 
   VaultExternalHttpListener:
     DependsOn:
-      - VaultExternalTargetGroup
-      - ExternalLoadBalancer
+    - VaultExternalTargetGroup
+    - ExternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
@@ -1239,8 +1238,8 @@ Resources:
 
   HAProxyHttpClusterListener:
     DependsOn:
-      - HAProxyHttpTargetGroup
-      - ExternalLoadBalancer
+    - HAProxyHttpTargetGroup
+    - ExternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
@@ -1252,8 +1251,8 @@ Resources:
 
   HAProxyHttpsClusterListener:
     DependsOn:
-      - HAProxyHttpsTargetGroup
-      - ExternalLoadBalancer
+    - HAProxyHttpsTargetGroup
+    - ExternalLoadBalancer
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
       DefaultActions:
@@ -1269,23 +1268,23 @@ Resources:
 
   PublicDNS:
     DependsOn:
-      - ExternalLoadBalancer
+    - ExternalLoadBalancer
     Type: 'AWS::Route53::RecordSetGroup'
     Properties:
       HostedZoneId:
         'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-HostedZoneId'
       RecordSets:
-      - Name: !Join [ '.', [ 'consul', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+      - Name: !Join ['.', ['consul', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName']]
         Type: A
         AliasTarget:
           HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
           DNSName: !GetAtt ExternalLoadBalancer.DNSName
-      - Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+      - Name: !Join ['.', ['vault', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName']]
         Type: A
         AliasTarget:
           HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
           DNSName: !GetAtt ExternalLoadBalancer.DNSName
-      - Name: !Join [ '.', [ 'api', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName' ] ]
+      - Name: !Join ['.', ['api', 'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName']]
         Type: A
         AliasTarget:
           HostedZoneId: !GetAtt ExternalLoadBalancer.CanonicalHostedZoneID
@@ -1293,28 +1292,28 @@ Resources:
 
   PrivateDNS:
     DependsOn:
-      - InternalLoadBalancer
+    - InternalLoadBalancer
     Type: 'AWS::Route53::RecordSetGroup'
     Properties:
       HostedZoneId:
         'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-HostedZoneId'
       RecordSets:
-      - Name: !Join [ '.', [ 'consul', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+      - Name: !Join ['.', ['consul', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName']]
         Type: A
         AliasTarget:
           HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
           DNSName: !GetAtt InternalLoadBalancer.DNSName
-      - Name: !Join [ '.', [ 'vault', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+      - Name: !Join ['.', ['vault', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName']]
         Type: A
         AliasTarget:
           HostedZoneId: !GetAtt InternalLoadBalancer.CanonicalHostedZoneID
           DNSName: !GetAtt InternalLoadBalancer.DNSName
-      - Name: !Join [ '.', [ 'consul-server', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+      - Name: !Join ['.', ['consul-server', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName']]
         Type: A
         TTL: 300
         ResourceRecords:
         - 127.0.0.1
-      - Name: !Join [ '.', [ 'consul-agent', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName' ] ]
+      - Name: !Join ['.', ['consul-agent', 'Fn::ImportValue': !Sub '${ParentPrivateZoneStack}-DomainName']]
         Type: A
         TTL: 300
         ResourceRecords:
@@ -1322,10 +1321,10 @@ Resources:
 
   SwarmManagerLifecycleHook:
     DependsOn:
-      - SwarmManagerAutoScaleGroup
-      - SwarmLifecycleQueue
-      - SwarmLifecycleQueuePolicy
-      - SwarmManagerRole
+    - SwarmManagerAutoScaleGroup
+    - SwarmLifecycleQueue
+    - SwarmLifecycleQueuePolicy
+    - SwarmManagerRole
     Type: AWS::AutoScaling::LifecycleHook
     Properties:
       AutoScalingGroupName: !Ref SwarmManagerAutoScaleGroup
@@ -1336,20 +1335,20 @@ Resources:
 
   LifeCycleHookPolicy:
     DependsOn:
-      - SwarmManagerRole
+    - SwarmManagerRole
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: "swarm-manager-lifecycle-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          -
-            Effect: "Allow"
-            Action:
-              - "autoscaling:CompleteLifecycleAction"
-            Resource: "*"
+        -
+          Effect: "Allow"
+          Action:
+          - "autoscaling:CompleteLifecycleAction"
+          Resource: "*"
       Roles:
-        - !Ref SwarmManagerRole
+      - !Ref SwarmManagerRole
 
   CPUUtilizationTooHighAlarm:
     Condition: HasAlertTopic
