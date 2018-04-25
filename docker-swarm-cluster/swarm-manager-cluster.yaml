@@ -27,6 +27,9 @@ Metadata:
       - EncryptionToken
       - ConsulACLDataCenter
       - ConsulACLMasterToken
+      - ConsulACLAgentToken
+      - ConsulACLVaultToken
+      - ConsulACLReadToken
 
 Parameters:
   ParentVPCStack:
@@ -156,6 +159,18 @@ Parameters:
   ConsulACLMasterToken:
     NoEcho: true
     Description: 'Only used for servers in the acl_datacenter, allows operators to bootstrap the ACL system with a token that is well-known.'
+    Type: String
+  ConsulACLAgentToken:
+    NoEcho: true
+    Description: 'Used by servers and agent for internal consul communication.'
+    Type: String
+  ConsulACLVaultToken:
+    NoEcho: true
+    Description: 'ACL used by Vault so that it can use Consul for storage.'
+    Type: String
+  ConsulACLReadToken:
+    NoEcho: true
+    Description: 'General read only permissions to Consul.'
     Type: String
 
 Conditions:
@@ -815,13 +830,13 @@ Resources:
                     "cleanup_dead_servers": true
                   },
                   "disable_update_check": true,
-                  "log_level": "warn",
+                  "log_level": "info",
                   "encrypt": "${EncryptionToken}",
                   "acl_datacenter": "${ConsulACLDataCenter}",
                   "acl_default_policy": "deny",
                   "acl_down_policy": "extend-cache",
                   "acl_master_token": "${ConsulACLMasterToken}",
-                  "acl_agent_token": "${ConsulACLMasterToken}"
+                  "acl_agent_token": "${ConsulACLAgentToken}"
                 }
               context:
                 ADVERTISE_ADRR: '{{ GetInterfaceIP \"eth0\" }}'
@@ -927,6 +942,14 @@ Resources:
               command: "docker stack deploy -c /opt/consul/compose.yaml consul"
               cwd: "~"
               ignoreErrors: true
+            init_consul_acls:
+              command: "docker run --log-driver=fluentd --name init-consul-acl --restart=no -e AGENT_ACL_TOKEN=$AGENT_TOKEN -e VAULT_ACL_TOKEN=$VAULT_TOKEN -e READ_ONLY_ACL_TOKEN=$READONLY_TOKEN -e CONSUL_HTTP_TOKEN=$MASTER_TOKEN -e CONSUL_HTTP_SSL=true -e CONSUL_HTTP_ADDR=`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8500 -e CONSUL_HTTP_SSL_VERIFY=false bhavikk/init-consul-acl:latest"
+              env:
+                MASTER_TOKEN: { "Ref" : "ConsulACLMasterToken" }
+                AGENT_TOKEN: { "Ref" : "ConsulACLAgentToken" }
+                VAULT_TOKEN: { "Ref" : "ConsulACLVaultToken" }
+                READONLY_TOKEN: { "Ref" : "ConsulACLReadToken" }
+              cwd: "~"
         vault:
           files:
             /opt/vault/vault.hcl:
@@ -936,7 +959,7 @@ Resources:
                   address = "consul-server.{{DOMAIN}}:8500"
                   path = "vault/"
                   scheme="https"
-                  token="${ConsulACLMasterToken}"
+                  token="${ConsulACLVaultToken}"
                   tls_cert_file = "/certs/live/{{DOMAIN}}/fullchain.pem"
                   tls_key_file = "/certs/live/{{DOMAIN}}/privkey.pem"
                   tls_ca_file = "/certs/live/{{DOMAIN}}/chain.pem"
@@ -959,7 +982,7 @@ Resources:
               command: "docker run --log-driver=fluentd -d --name vault --net=host --restart=always -e VAULT_API_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -v /etc/letsencrypt:/certs:ro -v /opt/vault:/config --cap-add IPC_LOCK vault server -config=/config/vault.hcl"
               cwd: "~"
             init_vault:
-              command: "docker run --log-driver=fluentd --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e VAULT_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -e VAULT_SKIP_VERIFY=true bhavikk/init-vault:latest"
+              command: "docker run --log-driver=fluentd --name init-vault --restart=no -e DYNAMODB_TABLE=$DYNAMODB_TABLE -e VAULT_ADDR=https://`curl http://169.254.169.254/latest/meta-data/local-ipv4`:8200 -e VAULT_SKIP_VERIFY=true bhavikk/init-vault:latest"
               env:
                 DYNAMODB_TABLE: { "Ref" : "VaultDynamoDBTable" }
               cwd: "~"
