@@ -71,6 +71,12 @@ Resources:
           - 's3:PutObject'
           Resource:
           - !Join ["", ["arn:aws:s3:::", !Ref Bucket, "/*"]]
+        -
+          Effect: 'Allow'
+          Action:
+          - 'cloudformation:ValidateTemplate'
+          Resource:
+          - '*'
 
   BuildCredentials:
     Type: 'AWS::IAM::AccessKey'
