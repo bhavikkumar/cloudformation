@@ -60,16 +60,12 @@ Resources:
         -
           Effect: 'Allow'
           Action:
-          - 's3:CreateBucket'
+          - 's3:ListBucket'
+          - 's3:ListObjects'
           - 's3:PutObject'
+          - 's3:DeleteObject'
           Resource:
           - !Join ["", ["arn:aws:s3:::", !Ref Bucket]]
-        -
-          Effect: 'Allow'
-          Action:
-          - 's3:CreateBucket'
-          - 's3:PutObject'
-          Resource:
           - !Join ["", ["arn:aws:s3:::", !Ref Bucket, "/*"]]
         -
           Effect: 'Allow'
