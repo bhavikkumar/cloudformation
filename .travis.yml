@@ -19,7 +19,7 @@ install:
 
 script:
 - yamllint .
-- if [[ $TRAVIS_PULL_REQUEST != "false" ]]; then find . -type f -name '*.y?ml' -print | while
+- if [[ $TRAVIS_PULL_REQUEST != "false" ]]; then find . -type f -name '*.y?ml' -printf '%P\n' | while
   read file; do set -ex && aws s3 cp "$file" "s3://cf-templates-depost/$TRAVIS_PULL_REQUEST_BRANCH/$file"
   && aws cloudformation validate-template --template-url "https://s3.amazonaws.com/cf-templates-depost/$TRAVIS_PULL_REQUEST_BRANCH/$file"
   > /dev/null; done; fi
