@@ -19,7 +19,7 @@ install:
 
 script:
 - yamllint .
-- if [[ $TRAVIS_PULL_REQUEST != "false" ]]; then find . -type f -name '*.y?ml' |  awk '{print "set -ex && aws cp " $1 " s3://cf-templates-0hkdaf7afa/" $1 " && aws cloudformation validate-template --template-url https://s3.amazonaws.com/cf-templates-0hkdaf7afa/" $1 "> /dev/null"}'; fi
+- if [[ $TRAVIS_PULL_REQUEST != "false" ]]; then find . -type f -name '*.y?ml' |  awk '{print "set -ex && aws cp " $1 " s3://cf-templates-depost/" $1 " && aws cloudformation validate-template --template-url https://s3.amazonaws.com/cf-templates-depost/" $1 "> /dev/null"}'; fi
 - if [[ $TRAVIS_PULL_REQUEST == "false" ]] && [[ $TRAVIS_BRANCH == "master" ]]; then find . -type f -name '*.y?ml' | while
   read file; do set -ex && aws s3 cp "$file" "s3://cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file"
   && aws cloudformation validate-template --template-url "https://s3.amazonaws.com/cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file"
