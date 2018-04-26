@@ -21,10 +21,14 @@ script:
 - yamllint .
 - if [[ $TRAVIS_PULL_REQUEST != "false" ]]; then find . -type f -name '*.y?ml' | while
   read file; do set -ex && aws s3 cp "$file" "s3://cf-templates-depost/$TRAVIS_PULL_REQUEST_BRANCH/$file"
-  && aws cloudformation validate-template --template-body "file://$file"
+  && aws cloudformation validate-template --template-url "https://s3.amazonaws.com/cf-templates-depost/$TRAVIS_PULL_REQUEST_BRANCH/$file"
   > /dev/null; done; fi
-- if [[ $TRAVIS_PULL_REQUEST == "false" ]] && [[ $TRAVIS_BRANCH == "master" ]]; then
-  find . -type f -name '*.y?ml' | while read file; do set -ex && aws s3 cp "$file"
-  "s3://cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file" && aws cloudformation validate-template
-  --template-url "https://s3.amazonaws.com/cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file"
+- if [[ $TRAVIS_PULL_REQUEST == "false" ]] && [[ $TRAVIS_BRANCH == "master" ]]; then find . -type f -name '*.y?ml' | while
+  read file; do set -ex && aws s3 cp "$file" "s3://cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file"
+  && aws cloudformation validate-template --template-url "https://s3.amazonaws.com/cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file"
   > /dev/null; done; fi
+
+after_success:
+- if [[ $TRAVIS_PULL_REQUEST != "false" ]]; then
+  aws s3 rm --recursive s3://cf-templates-depost/$TRAVIS_PULL_REQUEST_BRANCH;
+  fi
