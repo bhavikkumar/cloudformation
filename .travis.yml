@@ -28,7 +28,7 @@ script:
   && aws cloudformation validate-template --template-url "https://s3.amazonaws.com/cf-templates-depost/$TRAVIS_BUILD_NUMBER/$file"
   > /dev/null; done; fi
 
-after_success:
-- if [[ $TRAVIS_PULL_REQUEST != "false" ]]; then
-  aws s3 rm --recursive s3://cf-templates-depost/$TRAVIS_PULL_REQUEST_BRANCH;
-  fi
+# after_success:
+# - if [[ $TRAVIS_PULL_REQUEST != "false" ]]; then
+#   aws s3 rm --recursive s3://cf-templates-depost/$TRAVIS_PULL_REQUEST_BRANCH;
+#   fi
