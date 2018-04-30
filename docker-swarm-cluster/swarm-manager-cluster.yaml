@@ -729,6 +729,7 @@ Resources:
                 </filter>
                 <match **>
                   @type forward
+                  transport tls
                   send_timeout 60s
                   recover_wait 10s
                   hard_timeout 60s

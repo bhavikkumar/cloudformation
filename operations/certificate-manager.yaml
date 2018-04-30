@@ -10,10 +10,11 @@ Metadata:
       - ParentVPCStack
       - ParentPublicZoneStack
       - ParentAlertStack
-      - LogAggregatorStack
+      - LogAggregatorDNS
     - Label:
         default: 'Cert Bot Settings'
       Parameters:
+      - BucketName
       - LEEnvironment
       - EmailAddress
 
@@ -27,9 +28,13 @@ Parameters:
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
     Type: String
-  LogAggregatorStack:
-    Description: 'The log aggregator stack which was created using operations/fluentd-aggregator.yaml template'
+  LogAggregatorDNS:
+    Description: 'The log aggregator dns address as we deploy operations/fluentd-aggregator.yaml template afterwards'
     Type: String
+  BucketName:
+    Description: 'Optional name of the bucket.'
+    Type: String
+    Default: ''
   LEEnvironment:
     Description: The lets encrypt environment which we will be running against
     Type: String
@@ -43,6 +48,7 @@ Parameters:
 
 Conditions:
   CreateProdCertificates: !Equals [!Ref LEEnvironment, 'production']
+  HasBucketName: !Not [!Equals [!Ref BucketName, '']]
 
 Resources:
   CertificateManagerAsgNotification:
@@ -131,6 +137,7 @@ Resources:
     Type: "AWS::S3::Bucket"
     DeletionPolicy: Retain
     Properties:
+      BucketName: !If [HasBucketName, !Ref BucketName, !Ref 'AWS::NoValue']
       AccessControl: Private
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -219,7 +226,7 @@ Resources:
                 *.* @@localhost:5140
                 # ### end of the forwarding rule ###
             /etc/fluentd.conf:
-              content: |
+              content: !Sub |
                 <system>
                   log_level warn
                 </system>
@@ -246,11 +253,14 @@ Resources:
                 </filter>
                 <match **>
                   @type forward
+                  # Ths is required as the certificate manager is deployed first
+                  ignore_network_errors_at_startup true
+                  transport tls
                   send_timeout 60s
                   recover_wait 10s
                   hard_timeout 60s
                   <server>
-                    host {{LogAggregatorDNS}}
+                    host ${LogAggregatorDNS}
                     port 24224
                   </server>
                   <buffer>
@@ -260,9 +270,6 @@ Resources:
                     retry_wait 20s
                   </buffer>
                 </match>
-              context:
-                LogAggregatorDNS:
-                  'Fn::ImportValue': !Sub '${LogAggregatorStack}-LogAggregatorDNS'
           commands:
             run_fluentd:
               command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
