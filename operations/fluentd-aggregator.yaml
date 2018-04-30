@@ -11,6 +11,7 @@ Metadata:
       - ParentPublicZoneStack
       - ParentPrivateZoneStack
       - ParentAlertStack
+      - CertificateStack
     - Label:
         default: 'Sumologic Parameters'
       Parameters:
@@ -38,6 +39,9 @@ Parameters:
     Type: String
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
+    Type: String
+  CertificateStack:
+    Description: 'The certificate stack which was created using operations/certificate-manager.yaml template'
     Type: String
   SumoLogicSysLogCollector:
     Description: 'The SumoLogic HTTP collector URL where syslogs should be sent'
@@ -191,6 +195,56 @@ Resources:
       - !Select [1, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
       - !Select [2, !Split [",", "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPublic"]]
 
+  FluentServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        -
+          Effect: "Allow"
+          Principal:
+            Service:
+            - "ec2.amazonaws.com"
+            - "autoscaling.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      Path: /
+
+  CertificateBucketPolicy:
+    DependsOn:
+    - FluentServerRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "certificate-download-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        -
+          Effect: "Allow"
+          Action:
+          - "s3:ListBucket"
+          Resource:
+          - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn'
+        -
+          Effect: "Allow"
+          Action:
+          - s3:ListObjects
+          - "s3:GetObject"
+          Resource:
+          - !Join ["", ['Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucketArn', "/*"]]
+      Roles:
+      - !Ref FluentServerRole
+
+  FluentInstanceProfile:
+    DependsOn:
+    - FluentServerRole
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+      - !Ref FluentServerRole
+
   LogAggregatorTargetGroup:
     Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
     Properties:
@@ -208,11 +262,19 @@ Resources:
   LogAggLaunchConfiguration:
     Metadata:
       Comment: Launches a FluentD Log Aggregator
+      AWS::CloudFormation::Authentication:
+        CertificateAccessCreds:
+          type: "S3"
+          buckets:
+          - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+          roleName:
+            Ref: FluentServerRole
       AWS::CloudFormation::Init:
         configSets:
           full_install:
           - install_cfn
           - install_docker
+          - certificates
           - configure_rsyslog
           - configure_fluentd
           update_install:
@@ -251,6 +313,34 @@ Resources:
               docker:
                 enabled: 'true'
                 ensureRunning: 'true'
+        certificates:
+          files:
+            /tmp/letsencrypt.tar.gz:
+              source:
+                Fn::Join:
+                - ""
+                -
+                  - "https://"
+                  - 'Fn::ImportValue': !Sub '${CertificateStack}-CertificateBucket'
+                  - ".s3.amazonaws.com"
+                  - "/letsencrypt.tar.gz"
+              mode: "000644"
+              owner: "root"
+              group: "root"
+              authentication: "CertificateAccessCreds"
+          commands:
+            create_directory:
+              command: "mkdir -p /etc/letsencrypt"
+              cwd: "~"
+            extract_certificates:
+              command: "tar -zxf /tmp/letsencrypt.tar.gz -C /etc/letsencrypt/"
+              cwd: "~"
+            fix_permissions_live:
+              command: "chmod 755 /etc/letsencrypt/live"
+              cwd: "~"
+            fix_permissions_archive:
+              command: "chmod 755 /etc/letsencrypt/archive"
+              cwd: "~"
         configure_rsyslog:
           services:
             sysvinit:
@@ -290,6 +380,10 @@ Resources:
                   @type  forward
                   @id    general_input
                   port  24224
+                  <transport tls>
+                    cert_path              /etc/letsencrypt/live/{{DOMAIN}}/fullchain.pem
+                    private_key_path       /etc/letsencrypt/live/{{DOMAIN}}/privkey.pem
+                  </transport>
                 </source>
                 <source>
                   @type syslog
@@ -310,6 +404,8 @@ Resources:
                   </filter>
                   <match **>
                     @type forward
+                    transport tls
+                    tls_verify_hostname false
                     send_timeout 60s
                     recover_wait 10s
                     hard_timeout 60s
@@ -358,12 +454,16 @@ Resources:
                     retry_wait 20s
                   </buffer>
                 </match>
+              context:
+                DOMAIN:
+                  'Fn::ImportValue': !Sub '${ParentPublicZoneStack}-DomainName'
           commands:
             run_fluentd:
-              command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
+              command: "docker run -d -h `hostname` -p 24224:24224 -p 5140:5140 --restart=always -e FLUENTD_CONF=fluentd.conf -v /etc/letsencrypt:/etc/letsencrypt -v /data:/fluentd/log -v /etc/fluentd.conf:/fluentd/etc/fluentd.conf bhavikk/fluentd-sumologic:latest"
               cwd: "~"
     DependsOn:
     - LogAggregatorSecurityGroup
+    - FluentInstanceProfile
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       AssociatePublicIpAddress: true
@@ -374,6 +474,7 @@ Resources:
           VolumeType: !Ref DiskType
       ImageId: !FindInMap [AWSRegionArch2AMI, !Ref 'AWS::Region', !FindInMap [AWSInstanceType2Arch, !Ref 'InstanceType', Arch]]
       InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref FluentInstanceProfile
       SecurityGroups:
       - !Ref LogAggregatorSecurityGroup
       UserData:
