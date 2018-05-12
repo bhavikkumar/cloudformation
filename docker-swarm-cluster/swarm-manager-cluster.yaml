@@ -174,7 +174,6 @@ Parameters:
     Type: String
 
 Conditions:
-  HasKeyName: !Not [!Equals [!Ref KeyName, '']]
   HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
 
 Resources:
