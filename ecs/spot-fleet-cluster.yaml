@@ -1,0 +1,317 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Creates a ECS Cluster using Spot Fleet with percentage of the machines
+  being on-demand and rest made up using spot instances with scale up and down
+  policies.
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: Parent Stacks
+      Parameters:
+      - ParentVPCStack
+      - ParentAlertStack
+    - Label:
+        default: 'EC2 Parameters'
+      Parameters:
+      - KeyName
+    - Label:
+        default: 'Load Balancer Parameters'
+      Parameters:
+      - LoadBalancerScheme
+    - Label:
+        default: ECS Cluster Parameters
+      Parameters:
+      - OnDemandInstances
+      - OnDemandInstanceType
+      - DesiredFleetSize
+      - MaxSpotPrice
+
+Parameters:
+  ParentVPCStack:
+    Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
+    Type: String
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on operations/alert.yaml template.'
+    Type: String
+  LoadBalancerScheme:
+    Description: 'Indicates whether the load balancer in front of the ECS cluster is internet-facing or internal.'
+    Type: String
+    Default: 'internet-facing'
+    AllowedValues:
+    - 'internet-facing'
+    - internal
+  OnDemandInstances:
+    Description: 'Optional but recommended number of on demand instances to deploy as part of the fleet.'
+    Type: Number
+    Default: 1
+    MinValue: 1
+  OnDemandInstanceType:
+    Description: 'The instance type which will be used for the on-demand portion of the fleet'
+    Type: String
+    Default: t2.micro
+  DesiredFleetSize:
+    Description: 'Number of total instances to deploy as part of the spot fleet. The number of spot instances is DesiredClusterSize minus OnDemandInstances'
+    Type: Number
+    Default: 2
+    MinValue: 2
+  MaxSpotPrice:
+    Description: 'The maximum price per unit hour that you are willing to pay for a Spot Instance.'
+    Type: Number
+    Default: 0.03
+    MinValue: 0.001
+  KeyName:
+    Description: 'The SSH Key to use for the fleet.'
+    Type: AWS::EC2::KeyPair::KeyName
+
+Conditions:
+  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
+  HasLoadBalancerSchemeInternal: !Equals [!Ref LoadBalancerScheme, 'internal']
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties: {}
+
+  FleetLifecycleQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 14400
+      ReceiveMessageWaitTimeSeconds: 10
+
+  FleetInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        -
+          Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+        Version: 2012-10-17
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      Path: /
+
+  ECSUpdateInstanceStatePolicy:
+    DependsOn:
+    - FleetInstanceRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "ecs-update-container-instance-state"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        -
+          Effect: "Allow"
+          Action:
+          - "ecs:UpdateContainerInstancesState"
+          Resource: '*'
+      Roles:
+      - !Ref FleetInstanceRole
+
+  FleetLifecycleQueuePolicy:
+    DependsOn:
+    - FleetLifecycleQueue
+    - FleetInstanceRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "ecs-fleet-sqs-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        -
+          Effect: "Allow"
+          Action:
+          - "sqs:DeleteMessage"
+          - "sqs:ReceiveMessage"
+          - "sqs:SendMessage"
+          - "sqs:GetQueueUrl"
+          - "sns:Publish"
+          Resource: !GetAtt FleetLifecycleQueue.Arn
+      Roles:
+      - !Ref FleetInstanceRole
+
+  FleetInstanceProfile:
+    DependsOn:
+    - FleetInstanceRole
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+      - Ref: FleetInstanceRole
+
+  FleetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        -
+          Effect: Allow
+          Principal:
+            Service:
+            - spotfleet.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetRole
+      Path: /
+
+  SpotFleet:
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          full_install:
+          - update_instance
+          - install_cfn
+          update_install:
+          - update_instance
+          - install_cfn
+        update_instance:
+          commands:
+            yum_update:
+              command: "yum update -y"
+        install_cfn:
+          files:
+            "/etc/ecs/ecs.config":
+              mode: 000400
+              owner: root
+              group: root
+              content: !Sub |
+                  ECS_CLUSTER=${Cluster}
+                  ECS_AVAILABLE_LOGGING_DRIVERS=["json-file","fluentd"]
+            "/etc/cfn/cfn-hup.conf":
+              mode: 000400
+              owner: root
+              group: root
+              content: !Sub |
+                  [main]
+                  stack=${AWS::StackId}
+                  region=${AWS::Region}
+            "/etc/cfn/hooks.d/cfn-auto-reloader.conf":
+              content: !Sub |
+                  [cfn-auto-reloader-hook]
+                  triggers=post.update
+                  path=Resources.SpotFleet.Metadata.AWS::CloudFormation::Init
+                  action=/opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource SpotFleet -c update_install
+                  runas=root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                - /etc/cfn/cfn-hup.conf
+                - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+    Type: AWS::EC2::SpotFleet
+    Properties:
+      SpotFleetRequestConfigData:
+        AllocationStrategy: lowestPrice
+        ExcessCapacityTerminationPolicy: default
+        IamFleetRole: !Ref FleetRole
+        TargetCapacity: !Ref DesiredFleetSize
+        OnDemandTargetCapacity: !Ref OnDemandInstances
+        ReplaceUnhealthyInstances: true
+        TerminateInstancesWithExpiration: false
+        Type: maintain
+        LaunchSpecifications:
+        - ImageId: !FindInMap [AWSRegionToAMI, !Ref 'AWS::Region', ECSAMI]
+          InstanceType: !Ref OnDemandInstanceType
+          SubnetId: !If
+          - HasLoadBalancerSchemeInternal
+          - !Split
+            - ','
+            - 'Fn::ImportValue':
+                !Sub '${ParentVPCStack}-SubnetsPrivate'
+          - !Split
+            - ','
+            - 'Fn::ImportValue':
+                !Sub '${ParentVPCStack}-SubnetsPublic'
+          WeightedCapacity: !Ref OnDemandInstances
+          IamInstanceProfile:
+            Arn: !Ref FleetInstanceProfile
+          KeyName: !Ref KeyName
+          Monitoring:
+            Enabled: true
+          UserData:
+            Fn::Base64: !Sub |
+              #!/bin/bash -xe
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SpotFleet --region ${AWS::Region} --configsets full_install
+              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource SpotFleet --region ${AWS::Region}
+        - ImageId: !FindInMap [AWSRegionToAMI, !Ref 'AWS::Region', ECSAMI]
+          InstanceType: t2.small
+          SubnetId: !If
+          - HasLoadBalancerSchemeInternal
+          - !Split
+            - ','
+            - 'Fn::ImportValue':
+                !Sub '${ParentVPCStack}-SubnetsPrivate'
+          - !Split
+            - ','
+            - 'Fn::ImportValue':
+                !Sub '${ParentVPCStack}-SubnetsPublic'
+          WeightedCapacity: !Ref OnDemandInstances
+          IamInstanceProfile:
+            Arn: !Ref FleetInstanceProfile
+          KeyName: !Ref KeyName
+          Monitoring:
+            Enabled: true
+          UserData:
+            Fn::Base64: !Sub |
+              #!/bin/bash -xe
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SpotFleet --region ${AWS::Region} --configsets full_install
+              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource SpotFleet --region ${AWS::Region}
+
+Outputs:
+  Cluster:
+    Description: The name of the ECS cluster
+    Value: !Ref Cluster
+    Export:
+      Name: !Sub '${AWS::StackName}-Cluster'
+  SpotFleet:
+    Description: The name of the Spot Fleet
+    Value: !Ref SpotFleet
+  FleetLifecycleQueue:
+    Description: The Lifecycle SQS Queue which gets instance termination messages
+    Value: !GetAtt FleetLifecycleQueue.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-FleetLifecycleQueue'
+
+Mappings:
+  AWSRegionToAMI:
+    'ap-south-1':
+      ECSAMI: 'ami-72edc81d'
+    'eu-west-3':
+      ECSAMI: 'ami-250eb858'
+    'eu-west-2':
+      ECSAMI: 'ami-2218f945'
+    'eu-west-1':
+      ECSAMI: 'ami-2d386654'
+    'ap-northeast-2':
+      ECSAMI: 'ami-9d56f9f3'
+    'ap-northeast-1':
+      ECSAMI: 'ami-a99d8ad5'
+    'sa-east-1':
+      ECSAMI: 'ami-4a7e2826'
+    'ca-central-1':
+      ECSAMI: 'ami-897ff9ed'
+    'ap-southeast-1':
+      ECSAMI: 'ami-846144f8'
+    'ap-southeast-2':
+      ECSAMI: 'ami-efda148d'
+    'eu-central-1':
+      ECSAMI: 'ami-9fc39c74'
+    'us-east-1':
+      ECSAMI: 'ami-aff65ad2'
+    'us-east-2':
+      ECSAMI: 'ami-64300001'
+    'us-west-1':
+      ECSAMI: 'ami-69677709'
+    'us-west-2':
+      ECSAMI: 'ami-40ddb938'
